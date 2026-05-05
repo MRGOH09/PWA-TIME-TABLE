@@ -216,6 +216,113 @@ function bucketLabel(bucket, bucketBy) {
   return m ? 'W' + m[1] : bucket;
 }
 
+function computeTeacherBucketTotals(teacherKey, records, bucketBy) {
+  const teacherRecs = records.filter(r => r.teacher === teacherKey);
+  const totals = {};
+  const bucketSet = new Set();
+
+  function getBucket(r) {
+    if (bucketBy === 'month') return r.month || '';
+    if (bucketBy === 'week') return isoWeekOf(r.date) || '';
+    return '';
+  }
+
+  for (const r of teacherRecs) {
+    const bk = getBucket(r);
+    if (!bk) continue;
+    bucketSet.add(bk);
+    if (!totals[bk]) totals[bk] = { present: 0, absent: 0, none: 0, sessions: 0 };
+    const t = totals[bk];
+    t.present += r.present || 0;
+    t.absent += r.absent || 0;
+    t.none += r.none || 0;
+    t.sessions += 1;
+  }
+
+  for (const bk of Object.keys(totals)) {
+    const t = totals[bk];
+    t.total = t.present + t.absent + t.none;
+    t.rate = t.total > 0 ? t.present / t.total : null;
+  }
+
+  let buckets;
+  if (bucketBy === 'month') {
+    buckets = Array.from(bucketSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  } else {
+    buckets = Array.from(bucketSet).sort();
+  }
+
+  return { buckets, totals };
+}
+
+function renderTeacherSummary(teacherKey, records, bucketBy) {
+  const { buckets, totals } = computeTeacherBucketTotals(teacherKey, records, bucketBy);
+  if (!buckets.length) {
+    return '<p style="color:var(--muted);font-size:12px;">没有'
+      + (bucketBy === 'month' ? '月份' : '周次')
+      + '数据</p>';
+  }
+
+  const fmt = (n) => Number(n).toLocaleString();
+  const headers = buckets
+    .map(b => `<th class="num">${escapeHtml(bucketLabel(b, bucketBy))}</th>`)
+    .join('');
+
+  const presentCells = buckets.map(b => {
+    const t = totals[b];
+    return `<td class="num">${t ? fmt(t.present) : '—'}</td>`;
+  }).join('');
+  const totalCells = buckets.map(b => {
+    const t = totals[b];
+    return `<td class="num">${t ? fmt(t.total) : '—'}</td>`;
+  }).join('');
+
+  let prevRate = null, lastRate = null;
+  const rateCells = buckets.map(b => {
+    const t = totals[b];
+    if (!t || t.total === 0) return `<td class="num cell-empty">—</td>`;
+    if ((t.present + t.absent) === 0) return `<td class="num cell-unmarked">未点</td>`;
+    const r = t.rate;
+    if (lastRate != null) prevRate = lastRate;
+    lastRate = r;
+    const status = statusForAttendance(t.present, t.absent);
+    return `<td class="num cell-${status}" title="P ${t.present} A ${t.absent} N ${t.none}">${(r * 100).toFixed(1)}%</td>`;
+  }).join('');
+
+  let trendCell = '<td class="num trend-flat">—</td>';
+  if (prevRate != null && lastRate != null) {
+    const delta = lastRate - prevRate;
+    const deltaPct = (delta * 100).toFixed(1);
+    if (Math.abs(delta) < 0.05) {
+      trendCell = `<td class="num trend-flat">→ ${delta >= 0 ? '+' : ''}${deltaPct}%</td>`;
+    } else if (delta > 0) {
+      trendCell = `<td class="num trend-up">↑ +${deltaPct}%</td>`;
+    } else {
+      trendCell = `<td class="num trend-down">↓ ${deltaPct}%</td>`;
+    }
+  }
+
+  return `
+    <div class="month-matrix-wrap">
+      <table class="month-matrix">
+        <thead><tr>
+          <th>指标</th>
+          ${headers}
+          <th class="num">趋势</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><b>出席 (P)</b></td>${presentCells}<td class="num"></td></tr>
+          <tr><td><b>总人次</b></td>${totalCells}<td class="num"></td></tr>
+          <tr><td><b>出勤率</b></td>${rateCells}${trendCell}</tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="matrix-hint">
+      出勤率 = 出席 ÷ 总人次（总人次 = P + A + N，包含未点名）。趋势比较最近两个有数据的${bucketBy === 'month' ? '月' : '周'}。
+    </div>
+  `;
+}
+
 function renderTeacherMatrix(teacherKey, records, bucketBy, valueMode) {
   const { slots, buckets } = computeTeacherSlotMatrix(teacherKey, records, bucketBy);
   if (!slots.length) {
@@ -946,6 +1053,12 @@ function openTeacherModal(stat) {
 
   const matrixState = { bucketBy: 'month', valueMode: 'rate' };
 
+  function bucketWord() {
+    return matrixState.bucketBy === 'month' ? '月' : '周';
+  }
+  function renderSummary() {
+    return renderTeacherSummary(stat.teacher, records, matrixState.bucketBy);
+  }
   function renderMatrix() {
     return renderTeacherMatrix(stat.teacher, records, matrixState.bucketBy, matrixState.valueMode);
   }
@@ -962,19 +1075,23 @@ function openTeacherModal(stat) {
       <dt>本期出勤率</dt><dd>${pct(stat.attendanceRate)}</dd>
     </dl>
 
-    <h3>表现矩阵（每个时段 × ${matrixState.bucketBy === 'month' ? '月份' : '周次'}）</h3>
     <div class="matrix-toolbar">
       <span>横轴：</span>
       <span class="matrix-toggle" data-control="bucket">
         <button type="button" data-val="month" class="active">按月</button>
         <button type="button" data-val="week">按周</button>
       </span>
-      <span>显示：</span>
+      <span style="margin-left:8px;">下方矩阵显示：</span>
       <span class="matrix-toggle" data-control="value">
         <button type="button" data-val="rate" class="active">出勤率</button>
         <button type="button" data-val="count">P/总</button>
       </span>
     </div>
+
+    <h3 id="summary-h3">每${bucketWord()} 出勤汇总</h3>
+    <div id="summary-mount">${renderSummary()}</div>
+
+    <h3 id="matrix-h3">每个时段 × ${bucketWord()} 表现</h3>
     <div id="matrix-mount">${renderMatrix()}</div>
 
     <div class="actions">
@@ -989,11 +1106,18 @@ function openTeacherModal(stat) {
   state.modalOpen = true;
   $('#modal-close').addEventListener('click', closeModal);
 
+  function refreshAll() {
+    $('#summary-h3').textContent = `每${bucketWord()} 出勤汇总`;
+    $('#summary-mount').innerHTML = renderSummary();
+    $('#matrix-h3').textContent = `每个时段 × ${bucketWord()} 表现`;
+    $('#matrix-mount').innerHTML = renderMatrix();
+  }
+
   $$('.matrix-toggle[data-control="bucket"] button').forEach(btn => {
     btn.addEventListener('click', () => {
       matrixState.bucketBy = btn.getAttribute('data-val');
       $$('.matrix-toggle[data-control="bucket"] button').forEach(b => b.classList.toggle('active', b === btn));
-      $('#matrix-mount').innerHTML = renderMatrix();
+      refreshAll();
     });
   });
   $$('.matrix-toggle[data-control="value"] button').forEach(btn => {
