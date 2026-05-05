@@ -1295,29 +1295,120 @@ Do not implement the above in V1 unless explicitly requested.
 
 # Current Progress — 2026-05-05
 
-Project scaffolding has not started. The folder
-`/Users/gohchengyee/老师时间表/` only contains a `.claude/` directory.
+## V1 scaffolding shipped
+
+Initial commit pushed to `MRGOH09/PWA-TIME-TABLE` (branch `main`).
+
+Repository: https://github.com/MRGOH09/PWA-TIME-TABLE
+
+Files created:
+
+```text
+.gitignore
+AGENTS.md / CLAUDE.md / CODEX.md   (this spec, three identical copies)
+index.html
+manifest.json
+sw.js
+vercel.json
+api/_lark.py
+api/schedule.py
+api/requirements.txt
+js/gantt.js
+```
+
+All Python passes `python3 -m py_compile`.
+JS passes `node --check`.
+JSON passes `json.load`.
+
+## What's implemented
+
+Backend (`api/schedule.py` + `api/_lark.py`):
+
+* Tenant access token flow on `open.larksuite.com`
+* Pagination with `page_size=500` and `page_token` loop
+* Field normalization for all 17 Lark fields in section 5
+* `extract_text` / `extract_first_text` / `extract_number` / `extract_date`
+* `parse_day_order` / `parse_month_order` / `parse_time_range`
+* `normalize_record` returns the API contract from section 10
+* `send_json` with CORS headers and no-store cache
+
+Frontend (`index.html` + `js/gantt.js`):
+
+* Three top-level tabs: 周课表 Gantt / 老师工作量 / 出勤表现
+* Eight filters (`分行` / `中小` / `礼拜` / `科目` / `年纪` / `老师` /
+  `月份` / `出勤状态`); the last one is Gantt-only
+* Weekly slot derivation via dedupe key
+  `${branch}|${day}|${timeRange}|${subject}|${grade}|${teacher}`
+* Gantt grouped by 分行 → 礼拜, with overlapping slots stacked into lanes
+* Bar color by attendance status: 未点名 / 全勤 / 高出勤 / 中出勤 / 低出勤
+* Slot detail modal with full session history table
+* Cross-link from slot modal teacher name → Teachers view detail
+* Teachers view: summary cards, sortable leaderboard, 老师 × 礼拜 heatmap,
+  teacher detail modal listing all weekly slots
+* Attendance Trend view: line chart (rate by 月份/礼拜/日期 ×
+  分行/中小/科目/年纪/老师), stacked bar (P / A / 未点名),
+  underperforming-slots Top 20 table
+* 30s auto refresh paused when tab hidden or modal open
+* Responsive tweaks for screens narrower than 720px
+* PWA manifest + service worker shell cache (`tuition-shell-v1`)
+
+## Deployment configuration
+
+Lark Open Platform App:
+
+```text
+LARK_APP_ID = cli_a9731ac2ccf89e17
+```
+
+Lark Base URL (region: jp.larksuite.com UI; API stays on
+open.larksuite.com):
+
+```text
+LARK_BASE_TOKEN = HI4MbZfsiaU85bsZAYzj4zPnpng
+LARK_TABLE_ID   = tblY1JhKUqxZ0dZZ
+```
+
+`LARK_APP_SECRET` is configured directly in Vercel only — never committed.
+
+Required Lark scope for V1: `bitable:app:readonly` (read-only).
+The App must be added to the Base with at least 可阅读 permission.
 
 ## Confirmed scope
 
 * Read-only V1
-* Multi-branch
+* Multi-branch (current data observed: `PU`)
 * Weekly fixed timetable derived from session-level rows
 * Attendance broken down by 礼拜 and 月份
 * Three views: 周课表 Gantt, 老师工作量, 出勤表现
 
-## Pending confirmation
+## Pending
 
-* Branch list (currently observed: `PU`)
-* Subject codes (do not hardcode — pull from data)
-* Grade list — F1–F6 confirmed; primary labels (标5 / 标6 / others) to confirm
-* Auth: V1 fully public; revisit before sharing externally
+* Vercel deployment — env vars to be configured then deploy
+* Lark App publish + 添加文档应用 to the target Base
+* Smoke test against the live API once deployed
+* Design refresh — current UI is functional dark dashboard;
+  decision pending on direction (Apple Calendar / Linear / light /
+  iOS / 商务报表 etc.)
+* Mobile polish (label-col-w / minute-w already responsive,
+  but full mobile pass not yet validated)
+* Auth: V1 is fully public via the Vercel URL; revisit before
+  sharing externally (PIN gate or Lark OAuth)
+
+## Done so far in this session
+
+```text
+- Wrote three identical MD specs (AGENTS / CLAUDE / CODEX)
+- Built api/_lark.py + api/schedule.py
+- Built index.html + js/gantt.js + manifest.json + sw.js + vercel.json
+- Verified syntax of all Python / JS / JSON
+- git init in 老师时间表 (independent from parent home git repo)
+- Pushed initial commit to MRGOH09/PWA-TIME-TABLE main
+```
 
 ## Next Steps
 
-1. Confirm Lark Base table id and field names match section 5.
-2. Stand up `api/schedule.py` with pagination and field normalization.
-3. Render minimal Gantt with `分行` + `礼拜` rows.
-4. Layer on filters and summary cards.
-5. Build 老师工作量 and 出勤表现 tabs.
-6. Verify Vercel deployment with environment variables set.
+1. Import repo on Vercel and set the four env vars
+2. Trigger first deploy
+3. Open the deployed URL and confirm `共 N 条记录` shows up
+4. Iterate on visual design once a direction is chosen
+5. Spot-check a few teacher modals + attendance charts with real data

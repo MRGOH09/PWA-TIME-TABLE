@@ -138,6 +138,166 @@ function statusForAttendance(present, absent) {
   return 'low';
 }
 
+function isoWeekOf(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return null;
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function computeTeacherSlotMatrix(teacherKey, records, bucketBy) {
+  const teacherRecs = records.filter(r => r.teacher === teacherKey);
+  const slotMap = new Map();
+  const bucketSet = new Set();
+
+  function getBucket(r) {
+    if (bucketBy === 'month') return r.month || '';
+    if (bucketBy === 'week') return isoWeekOf(r.date) || '';
+    return '';
+  }
+
+  for (const r of teacherRecs) {
+    if (!r.day || !r.timeRange) continue;
+    const sk = slotKey(r);
+    if (!slotMap.has(sk)) {
+      slotMap.set(sk, {
+        key: sk,
+        branch: r.branch,
+        day: r.day,
+        dayOrder: r.dayOrder,
+        timeRange: r.timeRange,
+        startMinutes: r.startMinutes,
+        subject: r.subject,
+        grade: r.grade,
+        level: r.level,
+        teacher: r.teacher,
+        teacherDisplay: r.teacherDisplay,
+        classSize: 0,
+        buckets: {},
+      });
+    }
+    const slot = slotMap.get(sk);
+    if ((r.classSize || 0) > slot.classSize) slot.classSize = r.classSize;
+    const bk = getBucket(r);
+    if (!bk) continue;
+    bucketSet.add(bk);
+    if (!slot.buckets[bk]) slot.buckets[bk] = { present: 0, absent: 0, none: 0, sessions: 0 };
+    const b = slot.buckets[bk];
+    b.present += r.present || 0;
+    b.absent += r.absent || 0;
+    b.none += r.none || 0;
+    b.sessions += 1;
+  }
+
+  let buckets;
+  if (bucketBy === 'month') {
+    buckets = Array.from(bucketSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  } else {
+    buckets = Array.from(bucketSet).sort();
+  }
+
+  const slots = Array.from(slotMap.values()).sort((a, b) =>
+    (a.dayOrder - b.dayOrder) || ((a.startMinutes || 0) - (b.startMinutes || 0))
+  );
+
+  return { slots, buckets };
+}
+
+function bucketLabel(bucket, bucketBy) {
+  if (bucketBy === 'month') {
+    const m = String(bucket).split('.');
+    return m[1] || bucket;
+  }
+  const m = String(bucket).match(/W(\d+)/);
+  return m ? 'W' + m[1] : bucket;
+}
+
+function renderTeacherMatrix(teacherKey, records, bucketBy, valueMode) {
+  const { slots, buckets } = computeTeacherSlotMatrix(teacherKey, records, bucketBy);
+  if (!slots.length) {
+    return '<p style="color:var(--muted);font-size:12px;">没有数据</p>';
+  }
+  if (!buckets.length) {
+    return '<p style="color:var(--muted);font-size:12px;">'
+      + (bucketBy === 'month' ? '没有月份数据' : '没有日期数据')
+      + '</p>';
+  }
+
+  const headers = buckets
+    .map(b => `<th class="num">${escapeHtml(bucketLabel(b, bucketBy))}</th>`)
+    .join('');
+
+  const rowsHtml = slots.map(slot => {
+    let prevRate = null;
+    let lastRate = null;
+    const cells = buckets.map(b => {
+      const data = slot.buckets[b];
+      if (!data || (data.present === 0 && data.absent === 0 && data.none === 0)) {
+        return `<td class="num cell-empty">—</td>`;
+      }
+      const denom = data.present + data.absent;
+      if (denom === 0) {
+        return `<td class="num cell-unmarked" title="未点名 (${data.none}人)">未点</td>`;
+      }
+      const rate = data.present / denom;
+      if (lastRate != null) prevRate = lastRate;
+      lastRate = rate;
+      const status = statusForAttendance(data.present, data.absent);
+      const display = valueMode === 'count' ? `${data.present}/${denom}` : pct(rate);
+      const tooltip = `P ${data.present}  A ${data.absent}  sessions ${data.sessions}`;
+      return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
+    }).join('');
+
+    let trendCell = '<td class="num trend-flat">—</td>';
+    if (prevRate != null && lastRate != null) {
+      const delta = lastRate - prevRate;
+      const deltaPct = (delta * 100).toFixed(0);
+      if (Math.abs(delta) < 0.05) {
+        trendCell = `<td class="num trend-flat">→ ${delta >= 0 ? '+' : ''}${deltaPct}%</td>`;
+      } else if (delta > 0) {
+        trendCell = `<td class="num trend-up">↑ +${deltaPct}%</td>`;
+      } else {
+        trendCell = `<td class="num trend-down">↓ ${deltaPct}%</td>`;
+      }
+    }
+
+    return `<tr>
+      <td>${escapeHtml(slot.day)}</td>
+      <td>${escapeHtml(slot.timeRange)}</td>
+      <td>${escapeHtml(slot.subject)} ${escapeHtml(slot.grade)}</td>
+      <td>${escapeHtml(slot.branch || '-')}</td>
+      <td class="num">${slot.classSize}</td>
+      ${cells}
+      ${trendCell}
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="month-matrix-wrap">
+      <table class="month-matrix">
+        <thead><tr>
+          <th>礼拜</th>
+          <th>时间</th>
+          <th>课程</th>
+          <th>分行</th>
+          <th class="num">人数</th>
+          ${headers}
+          <th class="num">趋势</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="matrix-hint">
+      单元格颜色 = 当${bucketBy === 'month' ? '月' : '周'}出勤率（蓝=全勤 / 绿≥80% / 橙≥50% / 红&lt;50% / 灰=未点名）。
+      趋势 = 最近两个有数据的${bucketBy === 'month' ? '月' : '周'}的差值。鼠标悬停看 P/A/sessions。
+    </div>
+  `;
+}
+
 // ===================================================================
 // Data loading
 // ===================================================================
@@ -534,6 +694,7 @@ function openSlotModal(slot) {
 
 function closeModal() {
   $('#modal-root').classList.remove('show');
+  $('#modal-content').classList.remove('wide');
   state.modalOpen = false;
 }
 
@@ -774,7 +935,6 @@ function renderHeatmap(stats) {
 }
 
 function openTeacherModal(stat) {
-  const slots = stat.byDay; // not used directly here
   const records = filteredRecords();
   const teacherSlots = deriveWeeklySlots(records).filter(s => s.teacher === stat.teacher);
   teacherSlots.sort((a, b) => (a.dayOrder - b.dayOrder) || (a.startMinutes - b.startMinutes));
@@ -784,15 +944,11 @@ function openTeacherModal(stat) {
                 : '';
   const branchPill = stat.branches ? `<span class="pill branch">${escapeHtml(stat.branches)}</span>` : '';
 
-  const slotRows = teacherSlots.map(s => `<tr>
-    <td>${escapeHtml(s.branch || '-')}</td>
-    <td>${escapeHtml(s.day || '-')}</td>
-    <td>${escapeHtml(s.timeRange || '-')}</td>
-    <td>${escapeHtml(s.subject || '-')}</td>
-    <td>${escapeHtml(s.grade || '-')}</td>
-    <td>${s.classSize}</td>
-    <td>${pct(s.attendanceRate)}</td>
-  </tr>`).join('');
+  const matrixState = { bucketBy: 'month', valueMode: 'rate' };
+
+  function renderMatrix() {
+    return renderTeacherMatrix(stat.teacher, records, matrixState.bucketBy, matrixState.valueMode);
+  }
 
   const html = `
     <h2>${escapeHtml(stat.teacherDisplay)} ${lvlPill} ${branchPill}</h2>
@@ -805,19 +961,48 @@ function openTeacherModal(stat) {
       <dt>本期未点名</dt><dd>${stat.none}</dd>
       <dt>本期出勤率</dt><dd>${pct(stat.attendanceRate)}</dd>
     </dl>
-    <h3>所有周课时段（${teacherSlots.length}）</h3>
-    <table>
-      <thead><tr><th>分行</th><th>礼拜</th><th>时间</th><th>科目</th><th>年纪</th><th>人数</th><th>出勤率</th></tr></thead>
-      <tbody>${slotRows || '<tr><td colspan="7" style="color:var(--muted);text-align:center;">没有时段</td></tr>'}</tbody>
-    </table>
+
+    <h3>表现矩阵（每个时段 × ${matrixState.bucketBy === 'month' ? '月份' : '周次'}）</h3>
+    <div class="matrix-toolbar">
+      <span>横轴：</span>
+      <span class="matrix-toggle" data-control="bucket">
+        <button type="button" data-val="month" class="active">按月</button>
+        <button type="button" data-val="week">按周</button>
+      </span>
+      <span>显示：</span>
+      <span class="matrix-toggle" data-control="value">
+        <button type="button" data-val="rate" class="active">出勤率</button>
+        <button type="button" data-val="count">P/总</button>
+      </span>
+    </div>
+    <div id="matrix-mount">${renderMatrix()}</div>
+
     <div class="actions">
       <button id="modal-close" type="button">关闭</button>
     </div>
   `;
-  $('#modal-content').innerHTML = html;
+
+  const modalEl = $('#modal-content');
+  modalEl.classList.add('wide');
+  modalEl.innerHTML = html;
   $('#modal-root').classList.add('show');
   state.modalOpen = true;
   $('#modal-close').addEventListener('click', closeModal);
+
+  $$('.matrix-toggle[data-control="bucket"] button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      matrixState.bucketBy = btn.getAttribute('data-val');
+      $$('.matrix-toggle[data-control="bucket"] button').forEach(b => b.classList.toggle('active', b === btn));
+      $('#matrix-mount').innerHTML = renderMatrix();
+    });
+  });
+  $$('.matrix-toggle[data-control="value"] button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      matrixState.valueMode = btn.getAttribute('data-val');
+      $$('.matrix-toggle[data-control="value"] button').forEach(b => b.classList.toggle('active', b === btn));
+      $('#matrix-mount').innerHTML = renderMatrix();
+    });
+  });
 }
 
 // ===================================================================

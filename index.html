@@ -309,6 +309,92 @@
     max-height: 85vh;
     overflow: auto;
   }
+  .modal.wide { max-width: 1100px; }
+
+  .matrix-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 8px 0 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .matrix-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .matrix-toggle button {
+    background: var(--panel-2);
+    color: var(--muted);
+    border: 0;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+  }
+  .matrix-toggle button:last-child { border-right: 0; }
+  .matrix-toggle button.active {
+    background: var(--accent);
+    color: #0b1220;
+    font-weight: 700;
+  }
+
+  .month-matrix-wrap {
+    overflow-x: auto;
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  table.month-matrix {
+    border-collapse: collapse;
+    font-size: 11px;
+    white-space: nowrap;
+    width: 100%;
+    background: var(--panel);
+  }
+  table.month-matrix th,
+  table.month-matrix td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+  }
+  table.month-matrix .num { text-align: right; }
+  table.month-matrix thead th {
+    background: var(--panel-2);
+    color: var(--muted);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  table.month-matrix tbody td.cell-empty { color: var(--muted); }
+  table.month-matrix tbody td.cell-unmarked {
+    background: var(--panel-2);
+    color: var(--muted);
+  }
+  table.month-matrix tbody td.cell-full { background: rgba(56,189,248,0.22); color: #f1f5f9; font-weight: 600; }
+  table.month-matrix tbody td.cell-high { background: rgba(16,185,129,0.22); color: #f1f5f9; font-weight: 600; }
+  table.month-matrix tbody td.cell-mid  { background: rgba(245,158,11,0.22); color: #f1f5f9; font-weight: 600; }
+  table.month-matrix tbody td.cell-low  { background: rgba(239,68,68,0.28);  color: #fff; font-weight: 700; }
+  table.month-matrix tbody tr:hover td:not(.cell-empty):not(.cell-unmarked) {
+    filter: brightness(1.15);
+  }
+
+  .trend-up   { color: var(--status-high); font-weight: 700; }
+  .trend-down { color: var(--status-low);  font-weight: 700; }
+  .trend-flat { color: var(--muted); }
+
+  .matrix-hint {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 6px;
+    line-height: 1.5;
+  }
   .modal h2 {
     margin: 0 0 4px;
     font-size: 16px;
