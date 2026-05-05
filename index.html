@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0f172a" />
+<title>周补习时间表 Dashboard</title>
+<link rel="manifest" href="/manifest.json" />
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+
+    --status-unmarked: #94a3b8;
+    --status-low: #ef4444;
+    --status-mid: #f59e0b;
+    --status-high: #10b981;
+    --status-full: #38bdf8;
+
+    --level-secondary: #38bdf8;
+    --level-primary: #fbbf24;
+
+    --label-col-w: 160px;
+    --minute-w: 1.4px;
+    --hour-w: calc(var(--minute-w) * 60);
+    --row-h: 60px;
+    --axis-h: 32px;
+    --axis-start: 480;
+    --axis-end: 1320;
+    --axis-span: 840;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  header.top {
+    padding: 16px 20px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  header.top h1 { margin: 0; font-size: 20px; }
+  header.top p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  header.top .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 20px 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    overflow-x: auto;
+  }
+  .tabs button {
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    white-space: nowrap;
+  }
+  .tabs button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: rgba(56,189,248,0.06);
+  }
+  .tabs button:hover:not(.active) { color: var(--text); }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    align-items: flex-end;
+  }
+  .filters label {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    color: var(--muted);
+    gap: 4px;
+  }
+  .filters select,
+  .filters input[type="search"] {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    min-width: 110px;
+  }
+  .filters input[type="search"] { min-width: 160px; }
+  .filters .spacer { flex: 1; }
+  .filters button {
+    background: var(--accent);
+    color: #0b1220;
+    border: 0;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .filters button.secondary {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+    padding: 12px 20px;
+  }
+  .summary .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .summary .card .label { font-size: 11px; color: var(--muted); }
+  .summary .card .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  .summary .card.full .value { color: var(--status-full); }
+  .summary .card.high .value { color: var(--status-high); }
+  .summary .card.mid .value { color: var(--status-mid); }
+  .summary .card.low .value { color: var(--status-low); }
+  .summary .card.unmarked .value { color: var(--status-unmarked); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 0 20px 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .legend .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .gantt-wrapper {
+    padding: 0 12px 24px;
+  }
+  .branch-block {
+    margin-bottom: 18px;
+  }
+  .branch-title {
+    padding: 10px 14px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px 10px 0 0;
+    border-bottom: none;
+  }
+  .branch-title .small {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 12px;
+    margin-left: 8px;
+  }
+
+  .gantt {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0 0 10px 10px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: var(--label-col-w) 1fr;
+  }
+  .gantt.solo { border-radius: 10px; }
+
+  .gantt-labels {
+    border-right: 1px solid var(--border);
+    background: var(--panel-2);
+    overflow: hidden;
+  }
+  .gantt-labels .axis-spacer {
+    height: var(--axis-h);
+    border-bottom: 1px solid var(--border);
+  }
+  .gantt-labels .row-label {
+    padding: 8px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    color: var(--accent);
+    font-weight: 700;
+    background: rgba(56,189,248,0.06);
+  }
+
+  .gantt-timeline-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .gantt-timeline {
+    width: calc(var(--axis-span) * var(--minute-w));
+    min-width: 100%;
+  }
+
+  .axis {
+    height: var(--axis-h);
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .axis .tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 1px solid var(--border);
+    padding: 6px 4px 0;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .row {
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    background-image: linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: var(--hour-w) 100%;
+  }
+
+  .bar {
+    position: absolute;
+    left: 0;
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: #0b1220;
+    cursor: pointer;
+    overflow: hidden;
+    border: 1px solid rgba(0,0,0,0.2);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .bar:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+  }
+  .bar .l1 { font-weight: 800; font-size: 12px; }
+  .bar .l2 { font-weight: 600; opacity: 0.92; }
+  .bar .l3 { font-size: 10px; opacity: 0.86; }
+  .bar.unmarked { background: var(--status-unmarked); }
+  .bar.low { background: var(--status-low); color: #fff; }
+  .bar.mid { background: var(--status-mid); }
+  .bar.high { background: var(--status-high); color: #fff; }
+  .bar.full { background: var(--status-full); }
+
+  .bar .att-badge {
+    display: inline-block;
+    margin-top: 2px;
+    padding: 1px 4px;
+    background: rgba(0,0,0,0.25);
+    color: #fff;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    align-self: flex-start;
+  }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(2,6,23,0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 50;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    max-width: 560px;
+    width: 100%;
+    max-height: 85vh;
+    overflow: auto;
+  }
+  .modal h2 {
+    margin: 0 0 4px;
+    font-size: 16px;
+  }
+  .modal h3 {
+    margin: 14px 0 6px;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .modal dl {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    gap: 4px 8px;
+    margin: 0;
+    font-size: 13px;
+  }
+  .modal dt { color: var(--muted); }
+  .modal dd { margin: 0; }
+  .modal table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .modal table th,
+  .modal table td {
+    padding: 4px 6px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal table th {
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .modal .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .modal button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .modal button.primary {
+    background: var(--accent);
+    color: #0b1220;
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .pill.secondary-level { background: var(--level-secondary); color: #0b1220; }
+  .pill.primary-level { background: var(--level-primary); color: #0b1220; }
+  .pill.branch { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+
+  .clickable-name {
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline dotted;
+  }
+
+  /* Teachers view */
+  .teacher-table-wrap,
+  .heatmap-wrap,
+  .underperf-wrap {
+    padding: 0 20px 24px;
+    overflow-x: auto;
+  }
+  table.data {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  table.data th,
+  table.data td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  table.data thead th {
+    background: var(--panel-2);
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  table.data thead th.sorted { color: var(--accent); }
+  table.data tr:hover td { background: rgba(56,189,248,0.04); }
+  table.data tr.clickable { cursor: pointer; }
+  table.data .num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data .barcell {
+    padding: 4px 10px;
+    width: 140px;
+  }
+  table.data .barcell .pct-bar {
+    height: 10px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.06);
+    position: relative;
+    overflow: hidden;
+  }
+  table.data .barcell .pct-bar > span {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--accent);
+  }
+
+  .heatmap {
+    display: grid;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 12px;
+  }
+  .heatmap .hcell {
+    padding: 6px 8px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+    color: var(--text);
+  }
+  .heatmap .hcell.head {
+    background: var(--panel-2);
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .heatmap .hcell.name {
+    text-align: left;
+    color: var(--accent);
+    cursor: pointer;
+    background: rgba(56,189,248,0.04);
+    font-weight: 600;
+  }
+  .heatmap .hcell.empty {
+    color: var(--muted);
+    background: var(--panel-2);
+  }
+
+  /* Attendance view */
+  .attendance-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 20px;
+    align-items: flex-end;
+  }
+  .attendance-charts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 0 20px 16px;
+  }
+  @media (min-width: 960px) {
+    .attendance-charts { grid-template-columns: 1fr 1fr; }
+  }
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .chart-card h3 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .chart-svg {
+    width: 100%;
+    height: 240px;
+    display: block;
+  }
+  .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .chart-legend .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .empty-msg {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  /* Mobile tweaks */
+  @media (max-width: 720px) {
+    :root {
+      --label-col-w: 110px;
+      --minute-w: 1.2px;
+      --row-h: 64px;
+    }
+    .filters { padding: 10px 12px; }
+    .summary { padding: 10px 12px; }
+    .gantt-wrapper { padding: 0 8px 20px; }
+    .bar .l3 { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>周补习时间表 Dashboard</h1>
+  <p>查看每个分行、每个礼拜、每位老师的课表与出勤表现</p>
+  <div class="meta" id="meta">数据加载中…</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="gantt" class="active">周课表 Gantt</button>
+  <button data-view="teachers">老师工作量</button>
+  <button data-view="attendance">出勤表现</button>
+</nav>
+
+<section class="filters" id="filters">
+  <label>分行
+    <select id="f-branch"><option value="">全部</option></select>
+  </label>
+  <label>中小
+    <select id="f-level">
+      <option value="">全部</option>
+      <option value="中学">中学</option>
+      <option value="小学">小学</option>
+    </select>
+  </label>
+  <label>礼拜
+    <select id="f-day"><option value="">全部</option></select>
+  </label>
+  <label>科目
+    <select id="f-subject"><option value="">全部</option></select>
+  </label>
+  <label>年纪
+    <select id="f-grade"><option value="">全部</option></select>
+  </label>
+  <label>老师
+    <select id="f-teacher"><option value="">全部</option></select>
+  </label>
+  <label>月份
+    <select id="f-month"><option value="">全部</option></select>
+  </label>
+  <label data-view-only="gantt">出勤状态
+    <select id="f-status">
+      <option value="">全部</option>
+      <option value="unmarked">未点名</option>
+      <option value="full">全勤</option>
+      <option value="high">高出勤</option>
+      <option value="mid">中出勤</option>
+      <option value="low">低出勤</option>
+    </select>
+  </label>
+  <div class="spacer"></div>
+  <button id="reset-filters" class="secondary" type="button">清除筛选</button>
+</section>
+
+<section class="summary" id="summary"></section>
+
+<section class="legend" id="legend">
+  <span><span class="dot" style="background:var(--status-full)"></span>全勤</span>
+  <span><span class="dot" style="background:var(--status-high)"></span>高出勤 ≥80%</span>
+  <span><span class="dot" style="background:var(--status-mid)"></span>中出勤 50–80%</span>
+  <span><span class="dot" style="background:var(--status-low)"></span>低出勤 &lt;50%</span>
+  <span><span class="dot" style="background:var(--status-unmarked)"></span>未点名</span>
+</section>
+
+<main>
+  <section id="view-gantt" class="view">
+    <div id="gantt-root" class="gantt-wrapper"></div>
+  </section>
+
+  <section id="view-teachers" class="view" style="display:none">
+    <div id="teachers-summary" class="summary"></div>
+    <div id="teachers-table-wrap" class="teacher-table-wrap"></div>
+    <div id="teachers-heatmap-wrap" class="heatmap-wrap"></div>
+  </section>
+
+  <section id="view-attendance" class="view" style="display:none">
+    <div class="attendance-controls">
+      <label>横轴
+        <select id="att-axis">
+          <option value="month">月份</option>
+          <option value="day">礼拜</option>
+          <option value="date">日期</option>
+        </select>
+      </label>
+      <label>分组
+        <select id="att-group">
+          <option value="">无</option>
+          <option value="branch">分行</option>
+          <option value="level">中小</option>
+          <option value="subject">科目</option>
+          <option value="grade">年纪</option>
+          <option value="teacher">老师</option>
+        </select>
+      </label>
+    </div>
+    <div class="attendance-charts">
+      <div class="chart-card">
+        <h3>出勤率 趋势</h3>
+        <svg class="chart-svg" id="att-line-svg"></svg>
+        <div class="chart-legend" id="att-line-legend"></div>
+      </div>
+      <div class="chart-card">
+        <h3>到课 vs 缺课 vs 未点名</h3>
+        <svg class="chart-svg" id="att-stack-svg"></svg>
+        <div class="chart-legend">
+          <span><span class="dot" style="background:var(--status-high)"></span>到课</span>
+          <span><span class="dot" style="background:var(--status-low)"></span>缺课</span>
+          <span><span class="dot" style="background:var(--status-unmarked)"></span>未点名</span>
+        </div>
+      </div>
+    </div>
+    <div class="underperf-wrap">
+      <h3 style="margin:0 0 8px;color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:0.04em;">表现差时段排行（出勤率最低 20）</h3>
+      <table class="data" id="underperf-table">
+        <thead>
+          <tr>
+            <th>分行</th>
+            <th>礼拜</th>
+            <th>时间</th>
+            <th>科目</th>
+            <th>年纪</th>
+            <th>老师</th>
+            <th class="num">出勤率</th>
+            <th class="num">sessions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div class="modal-backdrop" id="modal-root">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script src="/js/gantt.js?v=1"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
