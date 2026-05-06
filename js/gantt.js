@@ -124,15 +124,21 @@ function aggAttendance(rows) {
     absent += r.absent || 0;
     none += r.none || 0;
   }
-  const denom = present + absent;
-  const rate = denom > 0 ? present / denom : null;
+  // N is treated as Absent. Rate = P / (P + A + N) when at least some marking exists.
+  // If nothing has been marked yet (P+A === 0), rate is null and the slot shows 未点.
+  const markedSome = (present + absent) > 0;
+  const total = present + absent + none;
+  const rate = markedSome && total > 0 ? present / total : null;
   return { present, absent, none, rate, sessions: rows.length };
 }
 
-function statusForAttendance(present, absent) {
-  if (present + absent === 0) return 'unmarked';
-  if (absent === 0 && present > 0) return 'full';
-  const rate = present / (present + absent);
+function statusForAttendance(present, absent, none) {
+  none = none || 0;
+  const total = present + absent + none;
+  if (total === 0) return 'empty';
+  if ((present + absent) === 0) return 'unmarked';
+  if (absent === 0 && none === 0 && present > 0) return 'full';
+  const rate = present / total;
   if (rate >= 0.8) return 'high';
   if (rate >= 0.5) return 'mid';
   return 'low';
@@ -233,10 +239,11 @@ function computeTeacherBucketTotals(teacherKey, records, bucketBy) {
     }
     const total = present + absent + none;
     const markedTotal = present + absent;
+    // N counts as Absent for the rate. Rate is null only when nothing has been marked at all.
     totals[bucket] = {
       present, absent, none, sessions,
       total, markedTotal,
-      rate: markedTotal > 0 ? present / markedTotal : null,
+      rate: markedTotal > 0 && total > 0 ? present / total : null,
     };
   }
   return { buckets, totals };
@@ -301,12 +308,9 @@ function renderTeacherSummary(teacherKey, records, bucketBy) {
     if (!t || t.total === 0) return `<td class="num cell-empty">—</td>`;
     if (t.markedTotal === 0) return `<td class="num cell-unmarked" title="未点名 (${t.none}人)">未点</td>`;
     const r = t.rate;
-    const status = statusForAttendance(t.present, t.absent);
-    const partial = t.none > 0;
-    const partialClass = partial ? ' partial' : '';
-    const tooltip = `P ${t.present}  A ${t.absent}  N ${t.none}`
-      + (partial ? '  ⚠ 部分未点名，% 只反映已点学生' : '');
-    return `<td class="num cell-${status}${partialClass}" title="${escapeHtml(tooltip)}">${(r * 100).toFixed(1)}%</td>`;
+    const status = statusForAttendance(t.present, t.absent, t.none);
+    const tooltip = `P ${t.present}  A ${t.absent}  N ${t.none}  (N 当作缺席)`;
+    return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${(r * 100).toFixed(1)}%</td>`;
   }).join('');
 
   return `
@@ -327,9 +331,9 @@ function renderTeacherSummary(teacherKey, records, bucketBy) {
       </table>
     </div>
     <div class="matrix-hint">
-      出勤率 = 出席 ÷ (出席 + 缺课)，未点名 (N) 不计入分母（与下方矩阵公式一致）。
+      出勤率 = 出席 ÷ (出席 + 缺课 + 未点名)，<b>未点名 (N) 当作缺席</b>（与下方矩阵公式一致）。
+      整个 bucket 完全没有人被点名时显示"未点"，避免未发生的课错误显示 0%。
       <b>趋势</b> = 最近两个有数据${bucketBy === 'month' ? '月' : '周'}的<b>出席人次差</b>，括号内是百分比变化。
-      <br><b style="color:#fde68a;">带 * 号 + 斜纹</b>的 cell：N&gt;0，% 只反映已点学生，可能高估真实出勤率。鼠标悬停看 P/A/N 详情。
     </div>
   `;
 }
@@ -357,20 +361,18 @@ function renderTeacherMatrix(teacherKey, records, bucketBy, valueMode) {
       if (!data || (data.present === 0 && data.absent === 0 && data.none === 0)) {
         return `<td class="num cell-empty">—</td>`;
       }
-      const denom = data.present + data.absent;
-      if (denom === 0) {
+      if ((data.present + data.absent) === 0) {
         return `<td class="num cell-unmarked" title="未点名 (${data.none}人)">未点</td>`;
       }
-      const rate = data.present / denom;
+      // N counts as Absent: rate = P / (P+A+N)
+      const total = data.present + data.absent + data.none;
+      const rate = data.present / total;
       if (lastRate != null) prevRate = lastRate;
       lastRate = rate;
-      const status = statusForAttendance(data.present, data.absent);
-      const display = valueMode === 'count' ? `${data.present}/${denom}` : pct(rate);
-      const partial = data.none > 0;
-      const partialClass = partial ? ' partial' : '';
-      const tooltip = `P ${data.present}  A ${data.absent}  N ${data.none}  sessions ${data.sessions}`
-        + (partial ? '  ⚠ 部分未点名，% 只反映已点学生' : '');
-      return `<td class="num cell-${status}${partialClass}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
+      const status = statusForAttendance(data.present, data.absent, data.none);
+      const display = valueMode === 'count' ? `${data.present}/${total}` : pct(rate);
+      const tooltip = `P ${data.present}  A ${data.absent}  N ${data.none}  sessions ${data.sessions}  (N 当作缺席)`;
+      return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
     }).join('');
 
     let trendCell = '<td class="num trend-flat">—</td>';
@@ -413,9 +415,9 @@ function renderTeacherMatrix(teacherKey, records, bucketBy, valueMode) {
       </table>
     </div>
     <div class="matrix-hint">
-      单元格颜色 = 当${bucketBy === 'month' ? '月' : '周'}出勤率（蓝=全勤 / 绿≥80% / 橙≥50% / 红&lt;50% / 灰=未点名）。
+      出勤率 = 出席 ÷ (出席 + 缺课 + 未点名)，<b>未点名 (N) 当作缺席</b>。
+      单元格颜色：蓝=真 100% (P+A+N=P) / 绿≥80% / 橙≥50% / 红&lt;50% / 灰=完全未点。
       趋势 = 最近两个有数据的${bucketBy === 'month' ? '月' : '周'}的差值。鼠标悬停看 P/A/N/sessions。
-      <br><b style="color:#fde68a;">带 * 号 + 斜纹</b>的 cell：N&gt;0，% 只反映已点学生，未点名学生没算进分母。
     </div>
   `;
 }
@@ -517,7 +519,7 @@ function passFilters(rec, includeStatus) {
   if (f.teacher && rec.teacher !== f.teacher) return false;
   if (f.month && rec.month !== f.month) return false;
   if (includeStatus && f.status) {
-    const st = statusForAttendance(rec.present, rec.absent);
+    const st = statusForAttendance(rec.present, rec.absent, rec.none);
     if (st !== f.status) return false;
   }
   return true;
@@ -563,7 +565,7 @@ function deriveWeeklySlots(records) {
     slot.attendanceRate = agg.rate;
     slot.sessionCount = agg.sessions;
     slot.classSize = Math.max(...slot.sessions.map(s => s.classSize || 0), 0);
-    slot.status = statusForAttendance(slot.present, slot.absent);
+    slot.status = statusForAttendance(slot.present, slot.absent, slot.none);
   }
   return Array.from(map.values());
 }
@@ -590,8 +592,9 @@ function renderSummary() {
     absent += r.absent || 0;
     none += r.none || 0;
   }
-  const denom = present + absent;
-  const rate = denom > 0 ? present / denom : null;
+  const markedSome = (present + absent) > 0;
+  const total = present + absent + none;
+  const rate = markedSome && total > 0 ? present / total : null;
 
   const cards = [
     { label: '总分行数', value: branches.size },
@@ -757,7 +760,7 @@ function openSlotModal(slot) {
     ? `<table>
         <thead><tr><th>日期</th><th>None</th><th>P</th><th>A</th><th>状态</th></tr></thead>
         <tbody>${sessions.map(s => {
-          const st = statusForAttendance(s.present, s.absent);
+          const st = statusForAttendance(s.present, s.absent, s.none);
           return `<tr>
             <td>${escapeHtml(s.date || '-')}</td>
             <td>${s.none}</td>
@@ -872,8 +875,9 @@ function computeTeacherStats(records) {
       const d = slot.dayOrder;
       byDay[d] = (byDay[d] || 0) + hoursOf(slot);
     }
-    const denom = present + absent;
-    const rate = denom > 0 ? present / denom : null;
+    const markedSome = (present + absent) > 0;
+    const totalAll = present + absent + none;
+    const rate = markedSome && totalAll > 0 ? present / totalAll : null;
     totalHours += hours;
     out.push({
       teacher: s.teacher,
@@ -921,8 +925,10 @@ function renderTeachersView() {
   const totalHours = stats.reduce((a, s) => a + s.hours, 0);
   const present = stats.reduce((a, s) => a + s.present, 0);
   const absent = stats.reduce((a, s) => a + s.absent, 0);
-  const denom = present + absent;
-  const rate = denom > 0 ? present / denom : null;
+  const noneAll = stats.reduce((a, s) => a + (s.none || 0), 0);
+  const markedSome = (present + absent) > 0;
+  const totalAll = present + absent + noneAll;
+  const rate = markedSome && totalAll > 0 ? present / totalAll : null;
   const secondary = stats.filter(s => (s.level || '').includes('中学')).length;
   const primary = stats.filter(s => (s.level || '').includes('小学')).length;
   const totalSlots = stats.reduce((a, s) => a + s.slots, 0);
@@ -1241,9 +1247,10 @@ function renderAttendanceLine({ buckets, groups }, groupBy) {
     buckets.forEach((b, i) => {
       const g = b.groups.get(gk);
       if (!g) return;
-      const denom = g.present + g.absent;
-      if (denom === 0) return;
-      const rate = g.present / denom;
+      const markedSome = (g.present + g.absent) > 0;
+      const total = g.present + g.absent + (g.none || 0);
+      if (!markedSome || total === 0) return;
+      const rate = g.present / total;
       points.push([x(i), y(rate)]);
     });
     if (points.length < 1) return;
