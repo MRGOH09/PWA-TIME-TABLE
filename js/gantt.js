@@ -242,7 +242,8 @@ function computeTeacherBucketTotals(teacherKey, records, bucketBy) {
   for (const bk of Object.keys(totals)) {
     const t = totals[bk];
     t.total = t.present + t.absent + t.none;
-    t.rate = t.total > 0 ? t.present / t.total : null;
+    t.markedTotal = t.present + t.absent;
+    t.rate = t.markedTotal > 0 ? t.present / t.markedTotal : null;
   }
 
   let buckets;
@@ -268,39 +269,55 @@ function renderTeacherSummary(teacherKey, records, bucketBy) {
     .map(b => `<th class="num">${escapeHtml(bucketLabel(b, bucketBy))}</th>`)
     .join('');
 
+  // Track P count for trend (only buckets that have any data)
+  let prevP = null, lastP = null;
   const presentCells = buckets.map(b => {
     const t = totals[b];
-    return `<td class="num">${t ? fmt(t.present) : '—'}</td>`;
+    if (!t) return `<td class="num cell-empty">—</td>`;
+    const hasData = t.present !== 0 || t.absent !== 0 || t.none !== 0;
+    if (hasData) {
+      if (lastP != null) prevP = lastP;
+      lastP = t.present;
+    }
+    return `<td class="num">${fmt(t.present)}</td>`;
+  }).join('');
+
+  let presentTrend = '<td class="num trend-flat">—</td>';
+  if (prevP != null && lastP != null) {
+    const delta = lastP - prevP;
+    const pct = prevP > 0 ? (delta / prevP * 100) : null;
+    const pctStr = pct != null ? ` (${delta >= 0 ? '+' : ''}${pct.toFixed(1)}%)` : '';
+    if (delta === 0) {
+      presentTrend = `<td class="num trend-flat">→ 0${pctStr}</td>`;
+    } else if (delta > 0) {
+      presentTrend = `<td class="num trend-up">↑ +${fmt(delta)}${pctStr}</td>`;
+    } else {
+      presentTrend = `<td class="num trend-down">↓ ${fmt(delta)}${pctStr}</td>`;
+    }
+  }
+
+  const absentCells = buckets.map(b => {
+    const t = totals[b];
+    return `<td class="num">${t ? fmt(t.absent) : '—'}</td>`;
+  }).join('');
+  const noneCells = buckets.map(b => {
+    const t = totals[b];
+    if (!t) return `<td class="num cell-empty">—</td>`;
+    return `<td class="num" style="color:var(--muted);">${fmt(t.none)}</td>`;
   }).join('');
   const totalCells = buckets.map(b => {
     const t = totals[b];
     return `<td class="num">${t ? fmt(t.total) : '—'}</td>`;
   }).join('');
 
-  let prevRate = null, lastRate = null;
   const rateCells = buckets.map(b => {
     const t = totals[b];
     if (!t || t.total === 0) return `<td class="num cell-empty">—</td>`;
-    if ((t.present + t.absent) === 0) return `<td class="num cell-unmarked">未点</td>`;
+    if (t.markedTotal === 0) return `<td class="num cell-unmarked" title="未点名 (${t.none}人)">未点</td>`;
     const r = t.rate;
-    if (lastRate != null) prevRate = lastRate;
-    lastRate = r;
     const status = statusForAttendance(t.present, t.absent);
     return `<td class="num cell-${status}" title="P ${t.present} A ${t.absent} N ${t.none}">${(r * 100).toFixed(1)}%</td>`;
   }).join('');
-
-  let trendCell = '<td class="num trend-flat">—</td>';
-  if (prevRate != null && lastRate != null) {
-    const delta = lastRate - prevRate;
-    const deltaPct = (delta * 100).toFixed(1);
-    if (Math.abs(delta) < 0.05) {
-      trendCell = `<td class="num trend-flat">→ ${delta >= 0 ? '+' : ''}${deltaPct}%</td>`;
-    } else if (delta > 0) {
-      trendCell = `<td class="num trend-up">↑ +${deltaPct}%</td>`;
-    } else {
-      trendCell = `<td class="num trend-down">↓ ${deltaPct}%</td>`;
-    }
-  }
 
   return `
     <div class="month-matrix-wrap">
@@ -308,17 +325,20 @@ function renderTeacherSummary(teacherKey, records, bucketBy) {
         <thead><tr>
           <th>指标</th>
           ${headers}
-          <th class="num">趋势</th>
+          <th class="num">趋势 (出席)</th>
         </tr></thead>
         <tbody>
-          <tr><td><b>出席 (P)</b></td>${presentCells}<td class="num"></td></tr>
+          <tr><td><b>出席 (P)</b></td>${presentCells}${presentTrend}</tr>
+          <tr><td><b>缺课 (A)</b></td>${absentCells}<td class="num"></td></tr>
+          <tr><td><b>未点 (N)</b></td>${noneCells}<td class="num"></td></tr>
           <tr><td><b>总人次</b></td>${totalCells}<td class="num"></td></tr>
-          <tr><td><b>出勤率</b></td>${rateCells}${trendCell}</tr>
+          <tr><td><b>出勤率</b></td>${rateCells}<td class="num"></td></tr>
         </tbody>
       </table>
     </div>
     <div class="matrix-hint">
-      出勤率 = 出席 ÷ 总人次（总人次 = P + A + N，包含未点名）。趋势比较最近两个有数据的${bucketBy === 'month' ? '月' : '周'}。
+      出勤率 = 出席 ÷ (出席 + 缺课)，未点名 (N) 不计入分母（与下方矩阵公式一致）。
+      <b>趋势</b> = 最近两个有数据${bucketBy === 'month' ? '月' : '周'}的<b>出席人次差</b>，括号内是百分比变化。
     </div>
   `;
 }
