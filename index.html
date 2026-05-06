@@ -384,6 +384,21 @@
   table.month-matrix tbody tr:hover td:not(.cell-empty):not(.cell-unmarked) {
     filter: brightness(1.15);
   }
+  table.month-matrix tbody td.partial {
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent,
+      transparent 5px,
+      rgba(255,255,255,0.10) 5px,
+      rgba(255,255,255,0.10) 7px
+    );
+  }
+  table.month-matrix tbody td.partial::after {
+    content: '*';
+    color: #fde68a;
+    margin-left: 2px;
+    font-weight: 800;
+  }
 
   .trend-up   { color: var(--status-high); font-weight: 700; }
   .trend-down { color: var(--status-low);  font-weight: 700; }

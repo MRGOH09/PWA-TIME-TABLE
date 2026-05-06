@@ -302,7 +302,11 @@ function renderTeacherSummary(teacherKey, records, bucketBy) {
     if (t.markedTotal === 0) return `<td class="num cell-unmarked" title="未点名 (${t.none}人)">未点</td>`;
     const r = t.rate;
     const status = statusForAttendance(t.present, t.absent);
-    return `<td class="num cell-${status}" title="P ${t.present} A ${t.absent} N ${t.none}">${(r * 100).toFixed(1)}%</td>`;
+    const partial = t.none > 0;
+    const partialClass = partial ? ' partial' : '';
+    const tooltip = `P ${t.present}  A ${t.absent}  N ${t.none}`
+      + (partial ? '  ⚠ 部分未点名，% 只反映已点学生' : '');
+    return `<td class="num cell-${status}${partialClass}" title="${escapeHtml(tooltip)}">${(r * 100).toFixed(1)}%</td>`;
   }).join('');
 
   return `
@@ -325,6 +329,7 @@ function renderTeacherSummary(teacherKey, records, bucketBy) {
     <div class="matrix-hint">
       出勤率 = 出席 ÷ (出席 + 缺课)，未点名 (N) 不计入分母（与下方矩阵公式一致）。
       <b>趋势</b> = 最近两个有数据${bucketBy === 'month' ? '月' : '周'}的<b>出席人次差</b>，括号内是百分比变化。
+      <br><b style="color:#fde68a;">带 * 号 + 斜纹</b>的 cell：N&gt;0，% 只反映已点学生，可能高估真实出勤率。鼠标悬停看 P/A/N 详情。
     </div>
   `;
 }
@@ -361,8 +366,11 @@ function renderTeacherMatrix(teacherKey, records, bucketBy, valueMode) {
       lastRate = rate;
       const status = statusForAttendance(data.present, data.absent);
       const display = valueMode === 'count' ? `${data.present}/${denom}` : pct(rate);
-      const tooltip = `P ${data.present}  A ${data.absent}  sessions ${data.sessions}`;
-      return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
+      const partial = data.none > 0;
+      const partialClass = partial ? ' partial' : '';
+      const tooltip = `P ${data.present}  A ${data.absent}  N ${data.none}  sessions ${data.sessions}`
+        + (partial ? '  ⚠ 部分未点名，% 只反映已点学生' : '');
+      return `<td class="num cell-${status}${partialClass}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
     }).join('');
 
     let trendCell = '<td class="num trend-flat">—</td>';
@@ -406,7 +414,8 @@ function renderTeacherMatrix(teacherKey, records, bucketBy, valueMode) {
     </div>
     <div class="matrix-hint">
       单元格颜色 = 当${bucketBy === 'month' ? '月' : '周'}出勤率（蓝=全勤 / 绿≥80% / 橙≥50% / 红&lt;50% / 灰=未点名）。
-      趋势 = 最近两个有数据的${bucketBy === 'month' ? '月' : '周'}的差值。鼠标悬停看 P/A/sessions。
+      趋势 = 最近两个有数据的${bucketBy === 'month' ? '月' : '周'}的差值。鼠标悬停看 P/A/N/sessions。
+      <br><b style="color:#fde68a;">带 * 号 + 斜纹</b>的 cell：N&gt;0，% 只反映已点学生，未点名学生没算进分母。
     </div>
   `;
 }
