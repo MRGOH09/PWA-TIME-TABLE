@@ -217,42 +217,28 @@ function bucketLabel(bucket, bucketBy) {
 }
 
 function computeTeacherBucketTotals(teacherKey, records, bucketBy) {
-  const teacherRecs = records.filter(r => r.teacher === teacherKey);
+  // Reuse the slot matrix to guarantee that the aggregate row
+  // is mathematically the sum of every visible slot row in the matrix below.
+  const { slots, buckets } = computeTeacherSlotMatrix(teacherKey, records, bucketBy);
   const totals = {};
-  const bucketSet = new Set();
-
-  function getBucket(r) {
-    if (bucketBy === 'month') return r.month || '';
-    if (bucketBy === 'week') return isoWeekOf(r.date) || '';
-    return '';
+  for (const bucket of buckets) {
+    let present = 0, absent = 0, none = 0, sessions = 0;
+    for (const slot of slots) {
+      const data = slot.buckets[bucket];
+      if (!data) continue;
+      present += data.present;
+      absent += data.absent;
+      none += data.none;
+      sessions += data.sessions;
+    }
+    const total = present + absent + none;
+    const markedTotal = present + absent;
+    totals[bucket] = {
+      present, absent, none, sessions,
+      total, markedTotal,
+      rate: markedTotal > 0 ? present / markedTotal : null,
+    };
   }
-
-  for (const r of teacherRecs) {
-    const bk = getBucket(r);
-    if (!bk) continue;
-    bucketSet.add(bk);
-    if (!totals[bk]) totals[bk] = { present: 0, absent: 0, none: 0, sessions: 0 };
-    const t = totals[bk];
-    t.present += r.present || 0;
-    t.absent += r.absent || 0;
-    t.none += r.none || 0;
-    t.sessions += 1;
-  }
-
-  for (const bk of Object.keys(totals)) {
-    const t = totals[bk];
-    t.total = t.present + t.absent + t.none;
-    t.markedTotal = t.present + t.absent;
-    t.rate = t.markedTotal > 0 ? t.present / t.markedTotal : null;
-  }
-
-  let buckets;
-  if (bucketBy === 'month') {
-    buckets = Array.from(bucketSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
-  } else {
-    buckets = Array.from(bucketSet).sort();
-  }
-
   return { buckets, totals };
 }
 
