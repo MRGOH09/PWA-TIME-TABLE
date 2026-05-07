@@ -447,27 +447,75 @@ function monthDeltaPair(monthPMap) {
 }
 
 // ===================================================================
-// Data loading
+// Data loading + localStorage cache
 // ===================================================================
 
-async function loadSchedule() {
+const CACHE_KEY = 'tuition-schedule-cache-v1';
+
+function loadFromLocalStorage() {
   try {
-    const resp = await fetch('/api/schedule?t=' + Date.now(), { cache: 'no-store' });
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.records)) return null;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveToLocalStorage(data) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      updatedAt: data.updatedAt,
+      records: data.records,
+      savedAt: Date.now(),
+    }));
+  } catch (e) {
+    // localStorage may be full / disabled — silently ignore
+  }
+}
+
+function applyData(data, source) {
+  const newHash = `${data.updatedAt}|${(data.records || []).length}`;
+  if (newHash === state.lastDataHash && state.records.length) {
+    state.dataSource = source;
+    updateMeta();
+    return false;
+  }
+  state.lastDataHash = newHash;
+  state.records = data.records || [];
+  state.updatedAt = data.updatedAt || '';
+  state.dataSource = source;
+  rebuildFilters();
+  renderAll();
+  updateMeta();
+  return true;
+}
+
+async function loadSchedule(opts) {
+  // On initial open: render last cached snapshot immediately so the
+  // user sees something while we wait for the network.
+  if (opts && opts.useCache) {
+    const cached = loadFromLocalStorage();
+    if (cached) applyData(cached, 'cache');
+  }
+
+  try {
+    // No ?t= cache-bust — we want CDN edge cache to work.
+    const resp = await fetch('/api/schedule');
     const data = await resp.json();
     if (!data || !data.success) {
       throw new Error(data && data.error ? data.error : '未知错误');
     }
-    const newHash = `${data.updatedAt}|${(data.records || []).length}`;
-    if (newHash === state.lastDataHash && state.records.length) {
+    const changed = applyData(data, 'network');
+    if (changed) saveToLocalStorage(data);
+  } catch (err) {
+    if (state.records.length) {
+      // We already have something showing; keep it instead of clobbering with an error.
+      console.warn('schedule fetch failed, keeping previous data:', err);
       return;
     }
-    state.lastDataHash = newHash;
-    state.records = data.records || [];
-    state.updatedAt = data.updatedAt || '';
-    rebuildFilters();
-    renderAll();
-    updateMeta();
-  } catch (err) {
     $('#meta').textContent = '无法读取 Lark Base 数据：' + (err.message || err);
     $('#meta').style.color = 'var(--status-low)';
   }
@@ -475,7 +523,10 @@ async function loadSchedule() {
 
 function updateMeta() {
   $('#meta').style.color = '';
-  $('#meta').textContent = `共 ${state.records.length} 条记录 · 更新时间 ${state.updatedAt || '-'}`;
+  const tail = state.dataSource === 'cache'
+    ? ' · <span style="color:var(--muted);">显示本地缓存，正在刷新…</span>'
+    : '';
+  $('#meta').innerHTML = `共 ${state.records.length} 条记录 · 更新时间 ${escapeHtml(state.updatedAt || '-')}${tail}`;
 }
 
 // ===================================================================
@@ -1887,7 +1938,7 @@ function init() {
   bindTabs();
   bindFilters();
   bindModalDismiss();
-  loadSchedule();
+  loadSchedule({ useCache: true });
   startAutoRefresh();
 }
 

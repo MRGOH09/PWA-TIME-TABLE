@@ -300,11 +300,11 @@ def normalize_record(item):
     }
 
 
-def send_json(handler, status, payload):
+def send_json(handler, status, payload, cache_control="no-store"):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Cache-Control", cache_control)
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")

@@ -26,8 +26,9 @@ class handler(BaseHTTPRequestHandler):
                 "updatedAt": datetime.now(tz).isoformat(timespec="seconds"),
                 "count": len(records),
                 "records": records,
-            })
+            }, cache_control="public, max-age=30, s-maxage=60, stale-while-revalidate=300")
         except Exception as exc:
+            # Errors stay no-store so a transient Lark failure won't get cached.
             send_json(self, 500, {"success": False, "error": str(exc)})
 
     def do_OPTIONS(self):
