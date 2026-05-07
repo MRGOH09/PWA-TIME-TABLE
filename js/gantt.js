@@ -422,6 +422,30 @@ function renderTeacherMatrix(teacherKey, records, bucketBy, valueMode) {
   `;
 }
 
+function fmtNum(n) {
+  return Number(n).toLocaleString();
+}
+
+function formatCountTrend(delta, prev) {
+  if (delta == null) return '<span class="trend-flat">—</span>';
+  const pctStr = (prev != null && prev > 0)
+    ? ` (${delta >= 0 ? '+' : ''}${(delta / prev * 100).toFixed(1)}%)`
+    : '';
+  if (delta === 0) return `<span class="trend-flat">→ 0${pctStr}</span>`;
+  if (delta > 0) return `<span class="trend-up">↑ +${fmtNum(delta)}${pctStr}</span>`;
+  return `<span class="trend-down">↓ ${fmtNum(delta)}${pctStr}</span>`;
+}
+
+function monthDeltaPair(monthPMap) {
+  const sorted = Array.from(monthPMap.keys()).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  if (sorted.length < 2) return { lastP: sorted.length === 1 ? monthPMap.get(sorted[0]) : null, prevP: null, delta: null };
+  const lastMonth = sorted[sorted.length - 1];
+  const prevMonth = sorted[sorted.length - 2];
+  const lastP = monthPMap.get(lastMonth);
+  const prevP = monthPMap.get(prevMonth);
+  return { lastP, prevP, delta: lastP - prevP, lastMonth, prevMonth };
+}
+
 // ===================================================================
 // Data loading
 // ===================================================================
@@ -578,6 +602,7 @@ function renderAll() {
   renderSummary();
   if (state.view === 'gantt') renderGantt();
   if (state.view === 'teachers') renderTeachersView();
+  if (state.view === 'subjects') renderSubjectsView();
   if (state.view === 'attendance') renderAttendanceView();
 }
 
@@ -1151,6 +1176,381 @@ function openTeacherModal(stat) {
 }
 
 // ===================================================================
+// Subjects view
+// ===================================================================
+
+function computeSubjectStats(records, level) {
+  const filtered = level ? records.filter(r => r.level === level) : records;
+  const map = new Map();
+
+  for (const r of filtered) {
+    if (!r.subject) continue;
+    const key = r.subject;
+    if (!map.has(key)) {
+      map.set(key, {
+        subject: key,
+        slotKeys: new Set(),
+        teachers: new Set(),
+        grades: new Set(),
+        branches: new Set(),
+        present: 0, absent: 0, none: 0,
+        slotClassSize: new Map(),  // slotKey -> max classSize
+        monthPMap: new Map(),
+      });
+    }
+    const s = map.get(key);
+    if (r.day && r.timeRange) {
+      const sk = slotKey(r);
+      s.slotKeys.add(sk);
+      const prev = s.slotClassSize.get(sk) || 0;
+      if ((r.classSize || 0) > prev) s.slotClassSize.set(sk, r.classSize || 0);
+    }
+    if (r.teacher) s.teachers.add(r.teacher);
+    if (r.grade) s.grades.add(r.grade);
+    if (r.branch) s.branches.add(r.branch);
+    s.present += r.present || 0;
+    s.absent += r.absent || 0;
+    s.none += r.none || 0;
+    if (r.month) {
+      s.monthPMap.set(r.month, (s.monthPMap.get(r.month) || 0) + (r.present || 0));
+    }
+  }
+
+  const out = [];
+  for (const s of map.values()) {
+    const total = s.present + s.absent + s.none;
+    const markedSome = (s.present + s.absent) > 0;
+    const rate = markedSome && total > 0 ? s.present / total : null;
+    let classSizeSum = 0;
+    s.slotClassSize.forEach(v => { classSizeSum += v; });
+    const trend = monthDeltaPair(s.monthPMap);
+    out.push({
+      subject: s.subject,
+      slots: s.slotKeys.size,
+      teachers: Array.from(s.teachers).sort(),
+      grades: Array.from(s.grades).sort((a, b) => gradeOrderOf(a) - gradeOrderOf(b)),
+      branches: Array.from(s.branches).sort(),
+      present: s.present,
+      absent: s.absent,
+      none: s.none,
+      total,
+      classSize: classSizeSum,
+      rate,
+      monthPMap: s.monthPMap,
+      trendDelta: trend.delta,
+      lastP: trend.lastP,
+      prevP: trend.prevP,
+    });
+  }
+
+  out.sort((a, b) => b.present - a.present);
+  return out;
+}
+
+function computeSubjectBreakdown(records, subject, level, dimension) {
+  const filtered = records.filter(r =>
+    r.subject === subject && (!level || r.level === level) && r[dimension]
+  );
+  const map = new Map();
+
+  for (const r of filtered) {
+    const key = r[dimension];
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        slotKeys: new Set(),
+        present: 0, absent: 0, none: 0,
+        slotClassSize: new Map(),
+        monthPMap: new Map(),
+      });
+    }
+    const e = map.get(key);
+    if (r.day && r.timeRange) {
+      const sk = slotKey(r);
+      e.slotKeys.add(sk);
+      const prev = e.slotClassSize.get(sk) || 0;
+      if ((r.classSize || 0) > prev) e.slotClassSize.set(sk, r.classSize || 0);
+    }
+    e.present += r.present || 0;
+    e.absent += r.absent || 0;
+    e.none += r.none || 0;
+    if (r.month) {
+      e.monthPMap.set(r.month, (e.monthPMap.get(r.month) || 0) + (r.present || 0));
+    }
+  }
+
+  const out = [];
+  for (const e of map.values()) {
+    const total = e.present + e.absent + e.none;
+    const markedSome = (e.present + e.absent) > 0;
+    const rate = markedSome && total > 0 ? e.present / total : null;
+    let classSizeSum = 0;
+    e.slotClassSize.forEach(v => { classSizeSum += v; });
+    const trend = monthDeltaPair(e.monthPMap);
+    out.push({
+      key: e.key,
+      slots: e.slotKeys.size,
+      present: e.present,
+      absent: e.absent,
+      none: e.none,
+      total,
+      classSize: classSizeSum,
+      rate,
+      trendDelta: trend.delta,
+      lastP: trend.lastP,
+      prevP: trend.prevP,
+    });
+  }
+
+  // Sort: gradeOrder for grade dimension, otherwise by present desc
+  if (dimension === 'grade') {
+    out.sort((a, b) => gradeOrderOf(a.key) - gradeOrderOf(b.key));
+  } else {
+    out.sort((a, b) => b.present - a.present);
+  }
+  return out;
+}
+
+function renderSubjectsView() {
+  const records = filteredRecords();
+
+  // Summary cards (de-emphasize rate; lead with P count)
+  const allStats = computeSubjectStats(records);
+  const secondary = allStats.filter(s => records.find(r => r.subject === s.subject && r.level === '中学'));
+  const primary   = allStats.filter(s => records.find(r => r.subject === s.subject && r.level === '小学'));
+  const totalP = allStats.reduce((a, s) => a + s.present, 0);
+  const totalA = allStats.reduce((a, s) => a + s.absent, 0);
+  const totalN = allStats.reduce((a, s) => a + s.none, 0);
+  const totalAll = totalP + totalA + totalN;
+  const overallRate = (totalP + totalA) > 0 && totalAll > 0 ? totalP / totalAll : null;
+
+  const cards = [
+    { label: '科目总数', value: allStats.length },
+    { label: '中学科目', value: secondary.length },
+    { label: '小学科目', value: primary.length },
+    { label: '本期总出席', value: fmtNum(totalP), cls: 'high' },
+    { label: '本期总缺课', value: fmtNum(totalA), cls: 'low' },
+    { label: '本期总未点', value: fmtNum(totalN), cls: 'unmarked' },
+    { label: '本期出勤率', value: pct(overallRate), cls: overallRate == null ? 'unmarked' : (overallRate >= 0.8 ? 'high' : (overallRate >= 0.5 ? 'mid' : 'low')) },
+  ];
+  $('#subjects-summary').innerHTML = cards.map(c => `
+    <div class="card ${c.cls || ''}">
+      <div class="label">${escapeHtml(c.label)}</div>
+      <div class="value">${escapeHtml(c.value)}</div>
+    </div>
+  `).join('');
+
+  $('#subjects-secondary-wrap').innerHTML = `
+    <div class="subject-section-title">中学科目 <span class="small">按总出席降序</span></div>
+    ${renderSubjectLeaderboard(records, '中学')}
+  `;
+  $('#subjects-primary-wrap').innerHTML = `
+    <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序</span></div>
+    ${renderSubjectLeaderboard(records, '小学')}
+  `;
+
+  $$('#view-subjects table.data tbody tr.clickable').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const subject = tr.getAttribute('data-subject');
+      const level = tr.getAttribute('data-level');
+      openSubjectModal(subject, level);
+    });
+  });
+}
+
+function renderSubjectLeaderboard(records, level) {
+  const stats = computeSubjectStats(records, level);
+  if (!stats.length) {
+    return `<div class="empty-msg">没有 ${escapeHtml(level)} 科目数据</div>`;
+  }
+
+  const rows = stats.map(s => {
+    return `<tr class="clickable" data-subject="${escapeHtml(s.subject)}" data-level="${escapeHtml(level)}">
+      <td class="col-key">${escapeHtml(s.subject)}</td>
+      <td class="num">${s.slots}</td>
+      <td class="num">${s.teachers.length}</td>
+      <td class="num">${fmtNum(s.classSize)}</td>
+      <td class="num"><b>${fmtNum(s.present)}</b></td>
+      <td class="num">${fmtNum(s.absent)}</td>
+      <td class="num">${fmtNum(s.none)}</td>
+      <td class="num">${pct(s.rate)}</td>
+      <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<table class="data">
+    <thead><tr>
+      <th>科目</th>
+      <th class="num">课时段</th>
+      <th class="num">老师数</th>
+      <th class="num">班级总人数</th>
+      <th class="num">出席</th>
+      <th class="num">缺课</th>
+      <th class="num">未点</th>
+      <th class="num">出勤率</th>
+      <th>趋势 (出席 月环比)</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function renderSubjectTrendChart(monthPMap) {
+  const entries = Array.from(monthPMap.entries())
+    .sort((a, b) => monthOrderOf(a[0]) - monthOrderOf(b[0]));
+  if (entries.length === 0) {
+    return '<p style="color:var(--muted);font-size:12px;">没有月份数据</p>';
+  }
+  if (entries.length === 1) {
+    return `<p style="color:var(--muted);font-size:12px;">只有 ${escapeHtml(entries[0][0])} 一个月的数据：${fmtNum(entries[0][1])} 人次</p>`;
+  }
+
+  const width = 600;
+  const height = 160;
+  const pad = { l: 44, r: 16, t: 16, b: 24 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+
+  const maxP = Math.max(...entries.map(e => e[1]), 1);
+  const xStep = w / (entries.length - 1);
+  const x = i => pad.l + i * xStep;
+  const y = v => pad.t + h - (v / maxP * h);
+
+  let html = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`;
+  for (let p = 0; p <= 1; p += 0.25) {
+    const yy = pad.t + h - p * h;
+    html += `<line x1="${pad.l}" y1="${yy}" x2="${pad.l + w}" y2="${yy}" stroke="#334155" stroke-dasharray="3,3"/>`;
+    html += `<text x="${pad.l - 6}" y="${yy + 3}" text-anchor="end" fill="#94a3b8" font-size="10">${Math.round(maxP * p)}</text>`;
+  }
+  const points = entries.map((e, i) => [x(i), y(e[1])]);
+  const path = points.map((p, i) => (i === 0 ? `M ${p[0]} ${p[1]}` : `L ${p[0]} ${p[1]}`)).join(' ');
+  html += `<path d="${path}" fill="none" stroke="#38bdf8" stroke-width="2"/>`;
+  points.forEach((p, i) => {
+    html += `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#38bdf8"/>`;
+    html += `<text x="${p[0]}" y="${p[1] - 8}" text-anchor="middle" fill="#e2e8f0" font-size="10">${fmtNum(entries[i][1])}</text>`;
+  });
+  entries.forEach((e, i) => {
+    const lbl = (e[0].split('.')[1] || e[0]).slice(0, 4);
+    html += `<text x="${x(i)}" y="${pad.t + h + 14}" text-anchor="middle" fill="#94a3b8" font-size="10">${escapeHtml(lbl)}</text>`;
+  });
+  html += '</svg>';
+  return html;
+}
+
+function renderSubjectBreakdownTable(records, subject, level, dimension, label) {
+  const stats = computeSubjectBreakdown(records, subject, level, dimension);
+  if (!stats.length) return '<p style="color:var(--muted);font-size:12px;">没有数据</p>';
+
+  const rows = stats.map(s => `<tr>
+    <td class="col-key">${escapeHtml(s.key)}</td>
+    <td class="num">${s.slots}</td>
+    <td class="num">${fmtNum(s.classSize)}</td>
+    <td class="num"><b>${fmtNum(s.present)}</b></td>
+    <td class="num">${fmtNum(s.absent)}</td>
+    <td class="num">${fmtNum(s.none)}</td>
+    <td class="num">${pct(s.rate)}</td>
+    <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
+  </tr>`).join('');
+
+  const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
+  const aggClassSize = stats.reduce((a, s) => a + s.classSize, 0);
+  const aggP = stats.reduce((a, s) => a + s.present, 0);
+  const aggA = stats.reduce((a, s) => a + s.absent, 0);
+  const aggN = stats.reduce((a, s) => a + s.none, 0);
+  const aggTotal = aggP + aggA + aggN;
+  const aggRate = (aggP + aggA) > 0 && aggTotal > 0 ? aggP / aggTotal : null;
+  const aggMonthPMap = new Map();
+  for (const s of computeSubjectBreakdown(records, subject, level, dimension)) {
+    // Skip — we'll compute aggregate trend from raw records
+  }
+  const subjectStats = computeSubjectStats(
+    records.filter(r => (!level || r.level === level)),
+    level
+  ).find(x => x.subject === subject);
+  const aggTrend = subjectStats ? subjectStats.trendDelta : null;
+  const aggPrev = subjectStats ? subjectStats.prevP : null;
+
+  const aggRow = `<tr class="agg-row">
+    <td>合计</td>
+    <td class="num">${aggSlots}</td>
+    <td class="num">${fmtNum(aggClassSize)}</td>
+    <td class="num">${fmtNum(aggP)}</td>
+    <td class="num">${fmtNum(aggA)}</td>
+    <td class="num">${fmtNum(aggN)}</td>
+    <td class="num">${pct(aggRate)}</td>
+    <td class="col-trend">${formatCountTrend(aggTrend, aggPrev)}</td>
+  </tr>`;
+
+  return `<table class="data">
+    <thead><tr>
+      <th>${escapeHtml(label)}</th>
+      <th class="num">课时段</th>
+      <th class="num">班级总人数</th>
+      <th class="num">出席</th>
+      <th class="num">缺课</th>
+      <th class="num">未点</th>
+      <th class="num">出勤率</th>
+      <th>趋势 (出席 月环比)</th>
+    </tr></thead>
+    <tbody>${rows}${aggRow}</tbody>
+  </table>`;
+}
+
+function openSubjectModal(subject, level) {
+  const records = filteredRecords();
+  const stat = computeSubjectStats(records, level).find(s => s.subject === subject);
+  if (!stat) return;
+
+  const lvlPill = level === '中学'
+    ? '<span class="pill secondary-level">中学</span>'
+    : level === '小学'
+      ? '<span class="pill primary-level">小学</span>'
+      : '';
+  const branchPill = stat.branches.length
+    ? `<span class="pill branch">${escapeHtml(stat.branches.join(', '))}</span>`
+    : '';
+
+  const trendBadge = formatCountTrend(stat.trendDelta, stat.prevP);
+
+  const html = `
+    <h2>科目 ${escapeHtml(stat.subject)} ${lvlPill} ${branchPill}</h2>
+    <dl>
+      <dt>课时段</dt><dd>${stat.slots}</dd>
+      <dt>老师数</dt><dd>${stat.teachers.length}</dd>
+      <dt>年纪</dt><dd>${stat.grades.length ? escapeHtml(stat.grades.join(', ')) : '-'}</dd>
+      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+      <dt>本期出席</dt><dd><b style="font-size:16px;">${fmtNum(stat.present)}</b></dd>
+      <dt>本期缺课</dt><dd>${fmtNum(stat.absent)}</dd>
+      <dt>本期未点</dt><dd>${fmtNum(stat.none)}</dd>
+      <dt>出勤率</dt><dd>${pct(stat.rate)}</dd>
+      <dt>月环比</dt><dd>${trendBadge}</dd>
+    </dl>
+
+    <h3>每月出席人次</h3>
+    <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
+
+    <h3>按老师拆分（合计行在底部）</h3>
+    ${renderSubjectBreakdownTable(records, subject, level, 'teacherDisplay', '老师')}
+
+    <h3>按年纪拆分</h3>
+    ${renderSubjectBreakdownTable(records, subject, level, 'grade', '年纪')}
+
+    <h3>按分行拆分</h3>
+    ${renderSubjectBreakdownTable(records, subject, level, 'branch', '分行')}
+
+    <div class="actions">
+      <button id="modal-close" type="button">关闭</button>
+    </div>
+  `;
+
+  const modalEl = $('#modal-content');
+  modalEl.classList.add('wide');
+  modalEl.innerHTML = html;
+  $('#modal-root').classList.add('show');
+  state.modalOpen = true;
+  $('#modal-close').addEventListener('click', closeModal);
+}
+
+// ===================================================================
 // Attendance trend view
 // ===================================================================
 
@@ -1358,6 +1758,7 @@ function switchView(view) {
   $$('#tabs button').forEach(b => b.classList.toggle('active', b.getAttribute('data-view') === view));
   $('#view-gantt').style.display = view === 'gantt' ? '' : 'none';
   $('#view-teachers').style.display = view === 'teachers' ? '' : 'none';
+  $('#view-subjects').style.display = view === 'subjects' ? '' : 'none';
   $('#view-attendance').style.display = view === 'attendance' ? '' : 'none';
   $$('[data-view-only]').forEach(node => {
     const v = node.getAttribute('data-view-only');
