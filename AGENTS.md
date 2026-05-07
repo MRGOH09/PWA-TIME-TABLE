@@ -701,30 +701,46 @@ When `中小 = 中学` is selected, all metrics scope to 中学 only
 
 # 17. Attendance Status Logic
 
+**N (未点名) is treated as Absent** in all rate calculations.
+This is the single source of truth across every view in the app.
+
 For each session row:
 
 ```text
-classSize       = none + present + absent
+classSize       = present + absent + none
 attended        = present
-attendanceRate  = present / (present + absent)   // only if present + absent > 0
+attendanceRate  = present / (present + absent + none)
+                  // valid only when (present + absent) > 0;
+                  // otherwise null and the cell renders as 未点
 ```
+
+The 未点 fallback (when nothing has been marked at all) keeps
+future-but-not-yet-happened classes from rendering as 0% red disasters.
+Once any marking exists for the bucket, unmarked students are
+conservatively counted as Absent.
 
 Status (per session):
 
 ```text
-未点名      present + absent === 0
-全勤        present > 0 and absent === 0
-高出勤      attendanceRate >= 0.8 and absent > 0
+未点名      (present + absent) === 0
+全勤        present > 0 and absent === 0 and none === 0
+高出勤      attendanceRate >= 0.8
 中出勤      0.5 <= attendanceRate < 0.8
 低出勤      attendanceRate < 0.5
 ```
+
+Note that 全勤 (the blue "true 100%" state) requires `none === 0` as
+well — a slot with `P=20, A=0, N=10` is not 全勤; it is `20/30 = 67%`
+(中出勤 amber).
 
 For a weekly slot (aggregated over its session history within current filters):
 
 ```text
 slotPresent      = Σ present
 slotAbsent       = Σ absent
-slotAttendance   = slotPresent / (slotPresent + slotAbsent)
+slotNone         = Σ none
+slotAttendance   = slotPresent / (slotPresent + slotAbsent + slotNone)
+                   // null when (slotPresent + slotAbsent) === 0
 ```
 
 Use the same thresholds for the aggregated slot status.
@@ -734,12 +750,23 @@ If the slot has zero non-未点名 sessions, treat the slot as 未点名.
 Color guide:
 
 ```text
-未点名      #94a3b8   grey
-低出勤      #ef4444   red
-中出勤      #f59e0b   amber
-高出勤      #10b981   green
-全勤        #38bdf8   blue
+未点名      #94a3b8   grey       (P + A === 0)
+低出勤      #ef4444   red        (rate < 50%)
+中出勤      #f59e0b   amber      (50% <= rate < 80%)
+高出勤      #10b981   green      (rate >= 80%)
+全勤        #38bdf8   blue       (real 100%: A === 0 AND N === 0)
 ```
+
+## Why N counts as Absent
+
+Earlier prototypes computed `rate = P / (P + A)` and ignored N.
+That formula made cells with `P=20, A=0, N=10` show `100%` while
+in reality only two-thirds of enrolled students were accounted for.
+A blue 100% cell looked identical to a clean fully-marked class.
+
+After data review with the user (2026-05-06), we standardized on
+`P / (P + A + N)`. A blue cell now means **真 100%** — every student
+was marked and every student attended.
 
 ---
 
@@ -1151,24 +1178,74 @@ Coloring:
 
 Opened by clicking a teacher row or heatmap name.
 
-Contents:
+The modal opens in **wide mode** (`max-width: 1100px`) because of
+the matrix tables it hosts. `closeModal` strips the `.wide` class so
+slot-detail modals open at the original 560px width.
+
+Contents (top to bottom):
 
 ```text
-姓名 + 中小 pill + 分行 pill
-
-周课时
-课程数
-班级总人数
-本期到课人次
-本期缺课人次
-本期出勤率
-
-本周时间表 — mini Gantt: one short track per weekday,
-            colored bars for each weekly slot
-
-所有周课时段（N） — list:
-  分行 · 礼拜 · 时间 · 科目 · 年纪 · 班级总人数 · 出勤率
+1. 姓名 + 中小 pill + 分行 pill
+2. dl block — 周课时 / 课程数 / 班级总人数 /
+              本期到课/缺课/未点名 / 本期出勤率
+3. matrix toolbar:
+     横轴：[按月] [按周]              ← drives both tables below
+     下方矩阵显示：[出勤率] [P/总]    ← drives only the slot matrix
+4. 每月/周 出勤汇总 — 5-row aggregate table
+5. 每个时段 × 月/周 表现 — slot × bucket matrix
+6. 关闭 button
 ```
+
+#### Aggregate summary table (5 rows)
+
+Columns are the buckets (months or ISO weeks) plus a 趋势 column.
+
+```text
+出席 (P)        Σ present          ← trend column lives here
+缺课 (A)        Σ absent
+未点 (N)        Σ none
+总人次          Σ (P + A + N)
+出勤率          Σ P / Σ (P+A+N)
+                colored by status   (cell-full / high / mid / low / unmarked)
+                未点 cell when (P+A) === 0 in that bucket
+```
+
+Trend column compares the **last two buckets that have any data**
+on the 出席 (P) row only — rate trend was rejected by the user as
+too noisy. Format:
+
+```text
+↑ +N (+M.N%)     count grew, percentage relative to previous bucket
+↓ -N (-M.N%)     count dropped
+→ 0              unchanged
+```
+
+The aggregate is computed by **summing the slot matrix's bucket cells
+exactly**, not by re-iterating raw records. This guarantees the top
+row's value equals the column sum of every visible row in the matrix
+below — no orphan records (e.g. rows with missing 礼拜/时间) drift
+into the aggregate without showing in the matrix.
+
+#### Slot × bucket matrix
+
+One row per unique slot for this teacher (sorted by 礼拜 then 时间).
+Columns: 礼拜 / 时间 / 课程 (科目+年纪) / 分行 / 人数 / one cell per
+bucket / 趋势.
+
+Cells:
+
+```text
+(P=A=N=0 in this bucket)         "—" cell-empty
+(P+A === 0 and N > 0)            "未点" cell-unmarked
+otherwise                         display rate or P/total
+                                  colored by status
+```
+
+`valueMode === 'count'` displays cells as `P/total` instead of `%`.
+`total` here is `P + A + N` (consistent with the rate formula).
+
+Trend per slot row: same algorithm as the aggregate row, applied to
+the rate sequence. Hidden when there are fewer than two data points.
 
 ## Cross-Linking from Gantt
 
@@ -1189,7 +1266,14 @@ renderTeachersSummary(stats, filtered)
 renderTeachersTable(stats)
 renderTeachersHeatmap(stats)
 renderTeachersView(filtered)
-openTeacherDetail(teacherKey, statsList)
+openTeacherModal(stat)              // teacher detail modal
+computeTeacherSlotMatrix(teacherKey, records, bucketBy)
+computeTeacherBucketTotals(teacherKey, records, bucketBy)
+                                    // delegates to slot matrix for consistency
+renderTeacherSummary(teacherKey, records, bucketBy)
+renderTeacherMatrix(teacherKey, records, bucketBy, valueMode)
+isoWeekOf(dateStr)                  // 'YYYY-MM-DD' -> 'YYYY-W##'
+bucketLabel(bucket, bucketBy)
 switchView(view)
 ```
 
@@ -1197,7 +1281,7 @@ switchView(view)
 
 * Table allows horizontal scrolling
 * Heatmap collapses label column to ~100px on narrow screens
-* Detail modal max-width 560px, max-height 85vh, scrollable
+* Detail modal max-width 1100px on desktop, scrolls horizontally on mobile
 
 ---
 
@@ -1293,15 +1377,29 @@ Do not implement the above in V1 unless explicitly requested.
 
 ---
 
-# Current Progress — 2026-05-05
+# Current Progress — 2026-05-07
 
-## V1 scaffolding shipped
+Repository: https://github.com/MRGOH09/PWA-TIME-TABLE  (branch `main`)
 
-Initial commit pushed to `MRGOH09/PWA-TIME-TABLE` (branch `main`).
+## Shipped commits
 
-Repository: https://github.com/MRGOH09/PWA-TIME-TABLE
+```text
+4619993  Treat N (未点名) as Absent in all attendance rate calculations
+4a47bd5  Flag partial-marking cells with asterisk + diagonal stripes  (superseded)
+21e7185  Make teacher summary aggregate sum from slot matrix exactly
+6fc6ad3  Fix attendance summary: consistent formula + count-based trend
+c9af506  Add per-teacher attendance summary table above slot matrix
+1fc94ed  Add per-teacher slot × month/week performance matrix
+94183f2  Initial commit: 周补习时间表 Dashboard V1
+```
 
-Files created:
+`4a47bd5` introduced an asterisk + stripe marker on partial-marked
+cells. After deciding to treat N as Absent unconditionally
+(`4619993`), the rate itself became honest, so the marker was
+removed. CSS for `.partial` was deleted too; nothing in production
+uses it anymore.
+
+## File tree
 
 ```text
 .gitignore
@@ -1340,14 +1438,32 @@ Frontend (`index.html` + `js/gantt.js`):
 * Weekly slot derivation via dedupe key
   `${branch}|${day}|${timeRange}|${subject}|${grade}|${teacher}`
 * Gantt grouped by 分行 → 礼拜, with overlapping slots stacked into lanes
-* Bar color by attendance status: 未点名 / 全勤 / 高出勤 / 中出勤 / 低出勤
+* Bar color by attendance status using the unified
+  `P / (P + A + N)` formula — see section 17
 * Slot detail modal with full session history table
 * Cross-link from slot modal teacher name → Teachers view detail
-* Teachers view: summary cards, sortable leaderboard, 老师 × 礼拜 heatmap,
-  teacher detail modal listing all weekly slots
-* Attendance Trend view: line chart (rate by 月份/礼拜/日期 ×
-  分行/中小/科目/年纪/老师), stacked bar (P / A / 未点名),
-  underperforming-slots Top 20 table
+
+Teachers view (老师工作量):
+
+* Summary cards, sortable leaderboard, 老师 × 礼拜 heatmap
+* **Teacher detail modal in wide mode** with two stacked tables:
+  * 5-row aggregate summary (出席 / 缺课 / 未点 / 总人次 / 出勤率)
+    with trend on the 出席 row (count-based, not rate-based)
+  * Slot × bucket matrix, colored cells, per-row trend on rate
+* Shared toolbar toggles: 按月 / 按周 (drives both tables) and
+  出勤率 / P/总 (drives only the slot matrix)
+* Aggregate is the column-sum of the slot matrix to guarantee
+  the two tables agree exactly
+
+Attendance Trend view (出勤表现):
+
+* Line chart (rate by 月份/礼拜/日期 × 分行/中小/科目/年纪/老师)
+* Stacked bar (P / A / N)
+* Underperforming-slots Top 20 table
+* All rate computations use the unified formula
+
+Other:
+
 * 30s auto refresh paused when tab hidden or modal open
 * Responsive tweaks for screens narrower than 720px
 * PWA manifest + service worker shell cache (`tuition-shell-v1`)
@@ -1373,6 +1489,22 @@ LARK_TABLE_ID   = tblY1JhKUqxZ0dZZ
 Required Lark scope for V1: `bitable:app:readonly` (read-only).
 The App must be added to the Base with at least 可阅读 permission.
 
+## Decisions captured this round
+
+1. **Trend semantics**: trend column compares **总出席 (P count)**
+   between the two latest buckets, not attendance-rate deltas.
+   Format: `↑ +N (+M.N%)` / `↓ -N (-M.N%)` / `→ 0`.
+   The percentage in parens is `delta / prevP`.
+2. **Aggregate consistency**: the top summary table sums directly
+   from the slot matrix's bucket cells, never from raw records.
+   This eliminates phantom data from rows missing 礼拜/时间 metadata
+   and guarantees that the top row equals the column-sum of every
+   slot row visible below.
+3. **N counts as Absent**: `rate = P / (P + A + N)` everywhere.
+   未点 cell only when nothing is marked at all (`P + A === 0`).
+   A blue 全勤 cell now means **真 100%** — every student marked
+   and every student attended.
+
 ## Confirmed scope
 
 * Read-only V1
@@ -1383,32 +1515,21 @@ The App must be added to the Base with at least 可阅读 permission.
 
 ## Pending
 
-* Vercel deployment — env vars to be configured then deploy
+* Vercel deployment — confirm env vars are configured and the app
+  loads the live API correctly
 * Lark App publish + 添加文档应用 to the target Base
-* Smoke test against the live API once deployed
-* Design refresh — current UI is functional dark dashboard;
-  decision pending on direction (Apple Calendar / Linear / light /
-  iOS / 商务报表 etc.)
-* Mobile polish (label-col-w / minute-w already responsive,
-  but full mobile pass not yet validated)
+* Smoke test against real data once deployed
+* Visual design refresh — current UI is functional dark dashboard;
+  no direction chosen yet (Apple Calendar / Linear / iOS / 商务 etc.)
+* Mobile polish — basic responsive tweaks done, full mobile pass
+  not yet validated
 * Auth: V1 is fully public via the Vercel URL; revisit before
   sharing externally (PIN gate or Lark OAuth)
 
-## Done so far in this session
-
-```text
-- Wrote three identical MD specs (AGENTS / CLAUDE / CODEX)
-- Built api/_lark.py + api/schedule.py
-- Built index.html + js/gantt.js + manifest.json + sw.js + vercel.json
-- Verified syntax of all Python / JS / JSON
-- git init in 老师时间表 (independent from parent home git repo)
-- Pushed initial commit to MRGOH09/PWA-TIME-TABLE main
-```
-
 ## Next Steps
 
-1. Import repo on Vercel and set the four env vars
-2. Trigger first deploy
-3. Open the deployed URL and confirm `共 N 条记录` shows up
-4. Iterate on visual design once a direction is chosen
-5. Spot-check a few teacher modals + attendance charts with real data
+1. Confirm Vercel deployment is live and pulling data
+2. Spot-check a busy teacher's modal — verify 全勤 cells correspond
+   to fully-marked classes
+3. Decide on visual design direction
+4. Mobile pass once design lands
