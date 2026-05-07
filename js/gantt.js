@@ -2011,41 +2011,89 @@ function bindModalDismiss() {
   });
 }
 
+function nowDateStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function viewLabel(view) {
+  if (view === 'gantt') return '周课表 Gantt';
+  if (view === 'teachers') return '老师工作量';
+  if (view === 'subjects') return '科目表现';
+  if (view === 'attendance') return '出勤表现';
+  return view || '';
+}
+
+function makePrintHeader(title, subtitle) {
+  const node = document.createElement('div');
+  node.className = 'print-header';
+  node.innerHTML = `
+    <div class="h-title">${escapeHtml(title)}</div>
+    <div class="h-sub">${escapeHtml(subtitle)}</div>
+  `;
+  return node;
+}
+
 function bindExportPDF() {
   const btn = $('#export-pdf-btn');
   if (!btn) return;
   btn.addEventListener('click', () => {
     if (state.modalOpen) closeModal();
-    // Mark the visible view so @media print can pick only that one,
-    // even though sections normally stay mounted.
     $$('.view').forEach(node => node.classList.remove('print-active'));
     const activeId = `view-${state.view}`;
     const active = document.getElementById(activeId);
     if (active) active.classList.add('print-active');
 
-    // teachers and subjects views render their own summary cards inside
-    // the view section, so the project-wide #summary is redundant on paper.
     const viewsWithOwnSummary = ['teachers', 'subjects'];
     document.body.classList.toggle('print-hide-top-summary', viewsWithOwnSummary.includes(state.view));
+
+    // Inject a print-only header into the active view so the PDF has a title.
+    let header = null;
+    if (active) {
+      header = makePrintHeader(
+        `周补习时间表 Dashboard · ${viewLabel(state.view)}`,
+        `导出于 ${nowDateStr()}  ·  数据更新 ${state.updatedAt || '-'}`
+      );
+      active.insertBefore(header, active.firstChild);
+    }
 
     setTimeout(() => {
       window.print();
       setTimeout(() => {
         $$('.view').forEach(node => node.classList.remove('print-active'));
         document.body.classList.remove('print-hide-top-summary');
+        if (header && header.parentNode) header.parentNode.removeChild(header);
       }, 200);
     }, 50);
   });
 }
 
 function exportModalPDF() {
-  // Print only the currently open modal contents. The dashboard chrome,
-  // tabs, filters, header etc. are all hidden by .print-modal-only.
+  // Inject a print-only header so the PDF identifies the entity (teacher
+  // or subject). The modal H2 already has the name; we just add a project
+  // line above it.
+  const modalContent = $('#modal-content');
+  if (!modalContent) {
+    document.body.classList.add('print-modal-only');
+    setTimeout(() => window.print(), 50);
+    return;
+  }
+  const h2 = modalContent.querySelector('h2');
+  const title = `周补习时间表 Dashboard`;
+  const subtitle = (h2 ? `${h2.textContent.trim()}  ·  ` : '')
+    + `导出于 ${nowDateStr()}  ·  数据更新 ${state.updatedAt || '-'}`;
+  const header = makePrintHeader(title, subtitle);
+  modalContent.insertBefore(header, modalContent.firstChild);
+
   document.body.classList.add('print-modal-only');
   setTimeout(() => {
     window.print();
     setTimeout(() => {
       document.body.classList.remove('print-modal-only');
+      if (header && header.parentNode) header.parentNode.removeChild(header);
     }, 200);
   }, 50);
 }

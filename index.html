@@ -6,20 +6,10 @@
 <meta name="theme-color" content="#0f172a" />
 <title>周补习时间表 Dashboard</title>
 <link rel="manifest" href="/manifest.json" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700&display=swap">
 <style>
-  /* CJK font wedged in via unicode-range so the browser picks PingFang SC
-     ONLY for Chinese characters and leaves Latin / digits to the system font.
-     Without this, forcing PingFang SC on everything makes Chrome rasterize
-     Latin glyphs in the print output (the PDF then has only arrows). */
-  @font-face {
-    font-family: "AppCJK";
-    src: local("PingFang SC"), local("Hiragino Sans GB"),
-         local("Microsoft YaHei"), local("Heiti SC"),
-         local("Source Han Sans CN"), local("Noto Sans CJK SC");
-    unicode-range: U+3000-30FF, U+3400-4DBF, U+4E00-9FFF,
-                   U+F900-FAFF, U+FF00-FFEF;
-  }
-
   :root {
     --bg: #0f172a;
     --panel: #1e293b;
@@ -51,7 +41,10 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "AppCJK",
+    /* Noto Sans SC is a real web font from Google so the browser can
+       embed it in print PDFs reliably. local PingFang SC would not
+       embed via Chrome's macOS print pipeline. */
+    font-family: -apple-system, BlinkMacSystemFont, "Noto Sans SC",
                  "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg);
     color: var(--text);
@@ -708,15 +701,33 @@
       --muted: #4b5563;
     }
 
-    /* Per-character font fallback is handled by the @font-face AppCJK
-       rule with unicode-range. Don't force a single font on every element
-       in print — that nukes Latin glyph subsets and the PDF ends up with
-       only arrows visible. The body declaration is enough. */
+    /* Use the Google-hosted Noto Sans SC for CJK so Chrome can embed
+       the font in the printed PDF. Local PingFang SC silently fails to
+       embed via the macOS print pipeline, leaving Chinese as blank glyphs. */
     body {
       background: white !important;
       color: black !important;
-      font-family: -apple-system, BlinkMacSystemFont, "AppCJK",
+      font-family: -apple-system, BlinkMacSystemFont, "Noto Sans SC",
                    "PingFang SC", "Microsoft YaHei", sans-serif !important;
+    }
+
+    /* Print header injected at the top of the active view / modal so the
+       PDF actually identifies what it is. */
+    .print-header {
+      display: block !important;
+      padding: 0 0 10px 0;
+      margin: 0 0 12px 0;
+      border-bottom: 2px solid #d1d5db;
+    }
+    .print-header .h-title {
+      font-size: 14pt;
+      font-weight: 700;
+      color: #111827;
+      margin: 0 0 2px 0;
+    }
+    .print-header .h-sub {
+      font-size: 10pt;
+      color: #4b5563;
     }
 
     /* When a per-view summary is showing, hide the top-level project summary
