@@ -863,7 +863,7 @@ function openSlotModal(slot) {
                 : '';
 
   const teacherLink = slot.teacher
-    ? `<span class="clickable-name" data-teacher="${escapeHtml(slot.teacher)}">${escapeHtml(slot.teacherDisplay || slot.teacher)}</span>`
+    ? `<span class="clickable-name" data-teacher="${escapeHtml(slot.teacher)}" data-level="${escapeHtml(slot.level || '')}">${escapeHtml(slot.teacherDisplay || slot.teacher)}</span>`
     : '-';
 
   const html = `
@@ -894,11 +894,10 @@ function openSlotModal(slot) {
   if (link) {
     link.addEventListener('click', () => {
       const t = link.getAttribute('data-teacher');
+      const lvl = link.getAttribute('data-level') || '';
       closeModal();
       switchView('teachers');
-      const stats = computeTeacherStats(filteredRecords());
-      const target = stats.find(s => s.teacher === t);
-      if (target) openTeacherModal(target);
+      openTeacherModal(t, lvl);
     });
   }
 }
@@ -913,120 +912,191 @@ function closeModal() {
 // Teachers view
 // ===================================================================
 
-function computeTeacherStats(records) {
-  const slots = deriveWeeklySlots(records);
-  const byTeacher = new Map();
+function computeTeacherStats(records, level) {
+  const filtered = level ? records.filter(r => r.level === level) : records;
+  const map = new Map();
+  const monthSet = new Set();
 
-  for (const slot of slots) {
-    const key = slot.teacher;
-    if (!key) continue;
-    if (!byTeacher.has(key)) {
-      byTeacher.set(key, {
+  for (const r of filtered) {
+    if (!r.teacher) continue;
+    if (r.month) monthSet.add(r.month);
+    const key = r.teacher;
+    if (!map.has(key)) {
+      map.set(key, {
         teacher: key,
-        teacherDisplay: slot.teacherDisplay || key,
-        branches: new Set(),
-        levels: new Set(),
+        teacherDisplay: r.teacherDisplay || key,
+        slotKeys: new Set(),
         subjects: new Set(),
         grades: new Set(),
-        slots: [],
-        slotKeys: new Set(),
+        branches: new Set(),
+        levels: new Set(),
+        slotClassSize: new Map(),
+        present: 0, absent: 0, none: 0,
+        months: {},
+        monthPMap: new Map(),
       });
     }
-    const s = byTeacher.get(key);
-    s.branches.add(slot.branch);
-    if (slot.level) s.levels.add(slot.level);
-    if (slot.subject) s.subjects.add(slot.subject);
-    if (slot.grade) s.grades.add(slot.grade);
-    if (!s.slotKeys.has(slot.key)) {
-      s.slotKeys.add(slot.key);
-      s.slots.push(slot);
+    const s = map.get(key);
+    if (r.day && r.timeRange) {
+      const sk = slotKey(r);
+      s.slotKeys.add(sk);
+      const prev = s.slotClassSize.get(sk) || 0;
+      if ((r.classSize || 0) > prev) s.slotClassSize.set(sk, r.classSize || 0);
+    }
+    if (r.subject) s.subjects.add(r.subject);
+    if (r.grade) s.grades.add(r.grade);
+    if (r.branch) s.branches.add(r.branch);
+    if (r.level) s.levels.add(r.level);
+    s.present += r.present || 0;
+    s.absent += r.absent || 0;
+    s.none += r.none || 0;
+    if (r.month) {
+      if (!s.months[r.month]) s.months[r.month] = { present: 0, absent: 0, none: 0 };
+      s.months[r.month].present += r.present || 0;
+      s.months[r.month].absent += r.absent || 0;
+      s.months[r.month].none += r.none || 0;
+      s.monthPMap.set(r.month, (s.monthPMap.get(r.month) || 0) + (r.present || 0));
     }
   }
 
-  const out = [];
-  let totalHours = 0;
-  for (const s of byTeacher.values()) {
-    let hours = 0;
-    let totalHead = 0;
-    let present = 0, absent = 0, none = 0;
-    let sessionCount = 0;
-    const byDay = {};
-    for (const slot of s.slots) {
-      hours += hoursOf(slot);
-      totalHead += slot.classSize || 0;
-      present += slot.present || 0;
-      absent += slot.absent || 0;
-      none += slot.none || 0;
-      sessionCount += slot.sessionCount || 0;
-      const d = slot.dayOrder;
-      byDay[d] = (byDay[d] || 0) + hoursOf(slot);
-    }
-    const markedSome = (present + absent) > 0;
-    const totalAll = present + absent + none;
-    const rate = markedSome && totalAll > 0 ? present / totalAll : null;
-    totalHours += hours;
-    out.push({
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+
+  const stats = [];
+  for (const s of map.values()) {
+    const total = s.present + s.absent + s.none;
+    const markedSome = (s.present + s.absent) > 0;
+    const rate = markedSome && total > 0 ? s.present / total : null;
+    let classSizeSum = 0;
+    s.slotClassSize.forEach(v => { classSizeSum += v; });
+    const trend = monthDeltaPair(s.monthPMap);
+    const overall = monthFirstLastDelta(s.monthPMap);
+    stats.push({
       teacher: s.teacher,
       teacherDisplay: s.teacherDisplay,
-      branches: Array.from(s.branches).sort().join(', '),
-      level: s.levels.size === 1 ? Array.from(s.levels)[0] : Array.from(s.levels).sort().join('/'),
-      slots: s.slots.length,
-      hours,
-      totalHead,
-      present,
-      absent,
-      none,
-      attendanceRate: rate,
-      sessionCount,
-      byDay,
+      slots: s.slotKeys.size,
+      subjects: Array.from(s.subjects).sort(),
+      grades: Array.from(s.grades).sort((a, b) => gradeOrderOf(a) - gradeOrderOf(b)),
+      branches: Array.from(s.branches).sort(),
+      levels: Array.from(s.levels),
+      present: s.present,
+      absent: s.absent,
+      none: s.none,
+      total,
+      classSize: classSizeSum,
+      rate,
+      months: s.months,
+      monthPMap: s.monthPMap,
+      trendDelta: trend.delta,
+      lastP: trend.lastP,
+      prevP: trend.prevP,
+      overallDelta: overall.delta,
+      overallFirstP: overall.firstP,
+      overallLastP: overall.lastP,
     });
   }
-  for (const t of out) {
-    t.hoursPct = totalHours > 0 ? t.hours / totalHours : 0;
-  }
-  return sortTeacherStats(out);
+
+  stats.sort((a, b) => b.present - a.present);
+  return { stats, months };
 }
 
-function sortTeacherStats(list) {
-  const { col, dir } = state.teacherSort;
-  const sign = dir === 'desc' ? -1 : 1;
-  const numeric = ['hours', 'slots', 'totalHead', 'attendanceRate', 'hoursPct'];
-  list.sort((a, b) => {
-    let va = a[col], vb = b[col];
-    if (numeric.includes(col)) {
-      va = va == null ? -Infinity : va;
-      vb = vb == null ? -Infinity : vb;
-      return (va - vb) * sign;
+function computeTeacherBreakdown(records, teacher, level, dimension) {
+  const filtered = records.filter(r =>
+    r.teacher === teacher && (!level || r.level === level) && r[dimension]
+  );
+  const map = new Map();
+  const monthSet = new Set();
+
+  for (const r of filtered) {
+    const key = r[dimension];
+    if (r.month) monthSet.add(r.month);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        slotKeys: new Set(),
+        present: 0, absent: 0, none: 0,
+        slotClassSize: new Map(),
+        months: {},
+        monthPMap: new Map(),
+      });
     }
-    return String(va || '').localeCompare(String(vb || '')) * sign;
-  });
-  return list;
+    const e = map.get(key);
+    if (r.day && r.timeRange) {
+      const sk = slotKey(r);
+      e.slotKeys.add(sk);
+      const prev = e.slotClassSize.get(sk) || 0;
+      if ((r.classSize || 0) > prev) e.slotClassSize.set(sk, r.classSize || 0);
+    }
+    e.present += r.present || 0;
+    e.absent += r.absent || 0;
+    e.none += r.none || 0;
+    if (r.month) {
+      if (!e.months[r.month]) e.months[r.month] = { present: 0, absent: 0, none: 0 };
+      e.months[r.month].present += r.present || 0;
+      e.months[r.month].absent += r.absent || 0;
+      e.months[r.month].none += r.none || 0;
+      e.monthPMap.set(r.month, (e.monthPMap.get(r.month) || 0) + (r.present || 0));
+    }
+  }
+
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+
+  const stats = [];
+  for (const e of map.values()) {
+    const total = e.present + e.absent + e.none;
+    const markedSome = (e.present + e.absent) > 0;
+    const rate = markedSome && total > 0 ? e.present / total : null;
+    let classSizeSum = 0;
+    e.slotClassSize.forEach(v => { classSizeSum += v; });
+    const trend = monthDeltaPair(e.monthPMap);
+    const overall = monthFirstLastDelta(e.monthPMap);
+    stats.push({
+      key: e.key,
+      slots: e.slotKeys.size,
+      present: e.present,
+      absent: e.absent,
+      none: e.none,
+      total,
+      classSize: classSizeSum,
+      rate,
+      months: e.months,
+      monthPMap: e.monthPMap,
+      trendDelta: trend.delta,
+      lastP: trend.lastP,
+      prevP: trend.prevP,
+      overallDelta: overall.delta,
+      overallFirstP: overall.firstP,
+      overallLastP: overall.lastP,
+    });
+  }
+
+  if (dimension === 'grade') {
+    stats.sort((a, b) => gradeOrderOf(a.key) - gradeOrderOf(b.key));
+  } else {
+    stats.sort((a, b) => b.present - a.present);
+  }
+  return { stats, months };
 }
 
 function renderTeachersView() {
   const records = filteredRecords();
-  const stats = computeTeacherStats(records);
 
-  // Summary
-  const totalHours = stats.reduce((a, s) => a + s.hours, 0);
-  const present = stats.reduce((a, s) => a + s.present, 0);
-  const absent = stats.reduce((a, s) => a + s.absent, 0);
-  const noneAll = stats.reduce((a, s) => a + (s.none || 0), 0);
-  const markedSome = (present + absent) > 0;
-  const totalAll = present + absent + noneAll;
-  const rate = markedSome && totalAll > 0 ? present / totalAll : null;
-  const secondary = stats.filter(s => (s.level || '').includes('中学')).length;
-  const primary = stats.filter(s => (s.level || '').includes('小学')).length;
-  const totalSlots = stats.reduce((a, s) => a + s.slots, 0);
+  const all = computeTeacherStats(records);
+  const sec = computeTeacherStats(records, '中学');
+  const pri = computeTeacherStats(records, '小学');
+  const totalP = all.stats.reduce((a, s) => a + s.present, 0);
+  const totalA = all.stats.reduce((a, s) => a + s.absent, 0);
+  const totalN = all.stats.reduce((a, s) => a + s.none, 0);
+  const totalAll = totalP + totalA + totalN;
+  const overallRate = (totalP + totalA) > 0 && totalAll > 0 ? totalP / totalAll : null;
 
   const cards = [
-    { label: '老师总数', value: stats.length },
-    { label: '中学老师', value: secondary },
-    { label: '小学老师', value: primary },
-    { label: '总周课时', value: `${totalHours.toFixed(1)}h` },
-    { label: '人均周课时', value: stats.length ? `${(totalHours / stats.length).toFixed(1)}h` : '0h' },
-    { label: '总课程数', value: totalSlots },
-    { label: '本期出勤率', value: pct(rate), cls: rate == null ? 'unmarked' : (rate >= 0.8 ? 'high' : (rate >= 0.5 ? 'mid' : 'low')) },
+    { label: '老师总数', value: all.stats.length },
+    { label: '中学老师', value: sec.stats.length },
+    { label: '小学老师', value: pri.stats.length },
+    { label: '本期总出席', value: fmtNum(totalP), cls: 'high' },
+    { label: '本期总缺课', value: fmtNum(totalA), cls: 'low' },
+    { label: '本期总未点', value: fmtNum(totalN), cls: 'unmarked' },
+    { label: '本期出勤率', value: pct(overallRate), cls: overallRate == null ? 'unmarked' : (overallRate >= 0.8 ? 'high' : (overallRate >= 0.5 ? 'mid' : 'low')) },
   ];
   $('#teachers-summary').innerHTML = cards.map(c => `
     <div class="card ${c.cls || ''}">
@@ -1035,171 +1105,182 @@ function renderTeachersView() {
     </div>
   `).join('');
 
-  // Table
-  const cols = [
-    { key: 'teacherDisplay', label: '老师' },
-    { key: 'branches', label: '分行' },
-    { key: 'level', label: '中小' },
-    { key: 'hours', label: '周课时', num: true },
-    { key: 'slots', label: '课程数', num: true },
-    { key: 'totalHead', label: '班级总人数', num: true },
-    { key: 'attendanceRate', label: '出勤率', num: true },
-    { key: 'hoursPct', label: '工时占比', bar: true },
-  ];
-  const sort = state.teacherSort;
-  const headHtml = cols.map(c => {
-    const sorted = sort.col === c.key ? `sorted` : '';
-    const arrow = sort.col === c.key ? (sort.dir === 'desc' ? ' ▼' : ' ▲') : '';
-    const cls = c.num ? `${sorted} num` : sorted;
-    return `<th class="${cls}" data-col="${c.key}">${escapeHtml(c.label)}${arrow}</th>`;
-  }).join('');
-  const bodyHtml = stats.map(t => {
-    return `<tr class="clickable" data-teacher="${escapeHtml(t.teacher)}">
-      <td>${escapeHtml(t.teacherDisplay)}</td>
-      <td>${escapeHtml(t.branches || '-')}</td>
-      <td>${escapeHtml(t.level || '-')}</td>
-      <td class="num">${t.hours.toFixed(1)}</td>
-      <td class="num">${t.slots}</td>
-      <td class="num">${t.totalHead}</td>
-      <td class="num">${pct(t.attendanceRate)}</td>
-      <td class="barcell">
-        <div class="pct-bar"><span style="width:${(t.hoursPct * 100).toFixed(1)}%; background: var(--${t.level === '小学' ? 'level-primary' : 'level-secondary'})"></span></div>
-      </td>
+  $('#teachers-table-wrap').innerHTML = `
+    <div class="subject-section-title">中学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
+    ${renderTeacherLeaderboard(records, '中学')}
+    <div class="subject-section-title primary" style="margin-top:18px;">小学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
+    ${renderTeacherLeaderboard(records, '小学')}
+  `;
+  // Heatmap section is no longer used in the teachers view; clear it so a previous render does not linger.
+  $('#teachers-heatmap-wrap').innerHTML = '';
+
+  $$('#view-teachers table tbody tr.clickable').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const teacher = tr.getAttribute('data-teacher');
+      const lvl = tr.getAttribute('data-level');
+      openTeacherModal(teacher, lvl);
+    });
+  });
+}
+
+function renderTeacherLeaderboard(records, level) {
+  const { stats, months } = computeTeacherStats(records, level);
+  if (!stats.length) {
+    return `<div class="empty-msg">没有 ${escapeHtml(level)} 老师数据</div>`;
+  }
+  if (!months.length) {
+    return `<div class="empty-msg">没有月份数据</div>`;
+  }
+
+  const monthHeaders = months
+    .map(m => `<th class="num">${escapeHtml(m.split('.')[1] || m)}</th>`)
+    .join('');
+
+  const rows = stats.map(s => {
+    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
+    const branchLabel = s.branches.length ? s.branches.join(', ') : '-';
+    return `<tr class="clickable" data-teacher="${escapeHtml(s.teacher)}" data-level="${escapeHtml(level)}">
+      <td class="col-key">${escapeHtml(s.teacherDisplay)}</td>
+      <td>${escapeHtml(branchLabel)}</td>
+      <td class="num">${s.slots}</td>
+      <td class="num">${s.subjects.length}</td>
+      ${monthCells}
+      <td class="num"><b>${fmtNum(s.present)}</b></td>
+      <td class="num">${pct(s.rate)}</td>
+      <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
+      <td class="col-trend">${formatCountTrend(s.overallDelta, s.overallFirstP)}</td>
     </tr>`;
   }).join('');
 
-  $('#teachers-table-wrap').innerHTML = `
-    <table class="data" id="teachers-table">
-      <thead><tr>${headHtml}</tr></thead>
-      <tbody>${bodyHtml || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">没有数据</td></tr>'}</tbody>
-    </table>
-  `;
-
-  // Bind sort
-  $$('#teachers-table thead th').forEach(th => {
-    th.addEventListener('click', () => {
-      const c = th.getAttribute('data-col');
-      if (state.teacherSort.col === c) {
-        state.teacherSort.dir = state.teacherSort.dir === 'desc' ? 'asc' : 'desc';
-      } else {
-        state.teacherSort.col = c;
-        state.teacherSort.dir = ['hours', 'slots', 'totalHead', 'attendanceRate', 'hoursPct'].includes(c) ? 'desc' : 'asc';
-      }
-      renderTeachersView();
-    });
-  });
-
-  // Bind row click
-  $$('#teachers-table tbody tr.clickable').forEach(tr => {
-    tr.addEventListener('click', () => {
-      const t = tr.getAttribute('data-teacher');
-      const target = stats.find(s => s.teacher === t);
-      if (target) openTeacherModal(target);
-    });
-  });
-
-  // Heatmap
-  renderHeatmap(stats);
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
+    <thead><tr>
+      <th>老师</th>
+      <th>分行</th>
+      <th class="num">时段</th>
+      <th class="num">科目</th>
+      ${monthHeaders}
+      <th class="num">总出席</th>
+      <th class="num">出勤率</th>
+      <th title="最近两个月对比">月环比</th>
+      <th title="第一个月 vs 最后一个月">全期</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
 }
 
-function renderHeatmap(stats) {
-  const wrap = $('#teachers-heatmap-wrap');
-  if (!stats.length) {
-    wrap.innerHTML = '';
-    return;
-  }
-  let maxHours = 0;
-  for (const s of stats) {
-    for (const d of Object.values(s.byDay)) {
-      if (d > maxHours) maxHours = d;
-    }
-  }
-  const dayHeads = DAYS.map(d => d.split('.')[1]);
-  let html = `<h3 style="margin:0 0 8px;color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:0.04em;">老师 × 礼拜 热力图</h3>`;
-  html += `<div class="heatmap" style="grid-template-columns: 130px repeat(7, 1fr) 70px;">`;
-  html += `<div class="hcell head">老师</div>`;
-  for (const d of dayHeads) html += `<div class="hcell head">${escapeHtml(d)}</div>`;
-  html += `<div class="hcell head">总</div>`;
+function renderTeacherBreakdownTable(records, teacher, level, dimension, label) {
+  const { stats, months } = computeTeacherBreakdown(records, teacher, level, dimension);
+  if (!stats.length) return '<p style="color:var(--muted);font-size:12px;">没有数据</p>';
+  if (!months.length) return '<p style="color:var(--muted);font-size:12px;">没有月份数据</p>';
 
-  for (const s of stats) {
-    html += `<div class="hcell name" data-teacher="${escapeHtml(s.teacher)}">${escapeHtml(s.teacherDisplay)}</div>`;
-    let total = 0;
-    for (let i = 1; i <= 7; i++) {
-      const h = s.byDay[i] || 0;
-      total += h;
-      if (h === 0) {
-        html += `<div class="hcell empty">·</div>`;
-      } else {
-        const intensity = Math.min(0.95, 0.15 + 0.85 * (h / Math.max(maxHours, 0.001)));
-        html += `<div class="hcell" style="background: rgba(56,189,248,${intensity})">${h.toFixed(1)}h</div>`;
+  const monthHeaders = months
+    .map(m => `<th class="num">${escapeHtml(m.split('.')[1] || m)}</th>`)
+    .join('');
+
+  const rows = stats.map(s => {
+    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
+    return `<tr>
+      <td class="col-key">${escapeHtml(s.key)}</td>
+      <td class="num">${s.slots}</td>
+      ${monthCells}
+      <td class="num"><b>${fmtNum(s.present)}</b></td>
+      <td class="num">${pct(s.rate)}</td>
+      <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
+      <td class="col-trend">${formatCountTrend(s.overallDelta, s.overallFirstP)}</td>
+    </tr>`;
+  }).join('');
+
+  const aggMonthly = {};
+  for (const m of months) {
+    aggMonthly[m] = { present: 0, absent: 0, none: 0 };
+    for (const s of stats) {
+      const md = s.months[m];
+      if (md) {
+        aggMonthly[m].present += md.present;
+        aggMonthly[m].absent += md.absent;
+        aggMonthly[m].none += md.none;
       }
     }
-    html += `<div class="hcell" style="background:var(--panel-2);font-weight:700;">${total.toFixed(1)}h</div>`;
   }
-  html += `</div>`;
-  wrap.innerHTML = html;
+  const aggMonthCells = months.map(m => monthCellHtml(aggMonthly[m])).join('');
+  const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
+  const aggP = stats.reduce((a, s) => a + s.present, 0);
+  const aggA = stats.reduce((a, s) => a + s.absent, 0);
+  const aggN = stats.reduce((a, s) => a + s.none, 0);
+  const aggTotal = aggP + aggA + aggN;
+  const aggRate = (aggP + aggA) > 0 && aggTotal > 0 ? aggP / aggTotal : null;
+  const aggMonthPMap = new Map();
+  for (const m of months) aggMonthPMap.set(m, aggMonthly[m].present);
+  const aggTrend = monthDeltaPair(aggMonthPMap);
+  const aggOverall = monthFirstLastDelta(aggMonthPMap);
 
-  $$('#teachers-heatmap-wrap .hcell.name').forEach(node => {
-    node.addEventListener('click', () => {
-      const t = node.getAttribute('data-teacher');
-      const target = stats.find(s => s.teacher === t);
-      if (target) openTeacherModal(target);
-    });
-  });
+  const aggRow = `<tr class="agg-row">
+    <td>合计</td>
+    <td class="num">${aggSlots}</td>
+    ${aggMonthCells}
+    <td class="num">${fmtNum(aggP)}</td>
+    <td class="num">${pct(aggRate)}</td>
+    <td class="col-trend">${formatCountTrend(aggTrend.delta, aggTrend.prevP)}</td>
+    <td class="col-trend">${formatCountTrend(aggOverall.delta, aggOverall.firstP)}</td>
+  </tr>`;
+
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
+    <thead><tr>
+      <th>${escapeHtml(label)}</th>
+      <th class="num">时段</th>
+      ${monthHeaders}
+      <th class="num">总出席</th>
+      <th class="num">出勤率</th>
+      <th title="最近两个月对比">月环比</th>
+      <th title="第一个月 vs 最后一个月">全期</th>
+    </tr></thead>
+    <tbody>${rows}${aggRow}</tbody>
+  </table></div>`;
 }
 
-function openTeacherModal(stat) {
+function openTeacherModal(teacher, level) {
   const records = filteredRecords();
-  const teacherSlots = deriveWeeklySlots(records).filter(s => s.teacher === stat.teacher);
-  teacherSlots.sort((a, b) => (a.dayOrder - b.dayOrder) || (a.startMinutes - b.startMinutes));
+  const stat = computeTeacherStats(records, level).stats.find(s => s.teacher === teacher);
+  if (!stat) return;
 
-  const lvlPill = stat.level === '中学' ? '<span class="pill secondary-level">中学</span>'
-                : stat.level === '小学' ? '<span class="pill primary-level">小学</span>'
-                : '';
-  const branchPill = stat.branches ? `<span class="pill branch">${escapeHtml(stat.branches)}</span>` : '';
+  const lvlPill = level === '中学'
+    ? '<span class="pill secondary-level">中学</span>'
+    : level === '小学'
+      ? '<span class="pill primary-level">小学</span>'
+      : '';
+  const branchPill = stat.branches.length
+    ? `<span class="pill branch">${escapeHtml(stat.branches.join(', '))}</span>`
+    : '';
 
-  const matrixState = { bucketBy: 'month', valueMode: 'rate' };
-
-  function bucketWord() {
-    return matrixState.bucketBy === 'month' ? '月' : '周';
-  }
-  function renderSummary() {
-    return renderTeacherSummary(stat.teacher, records, matrixState.bucketBy);
-  }
-  function renderMatrix() {
-    return renderTeacherMatrix(stat.teacher, records, matrixState.bucketBy, matrixState.valueMode);
-  }
+  const trendBadge = formatCountTrend(stat.trendDelta, stat.prevP);
+  const overallBadge = formatCountTrend(stat.overallDelta, stat.overallFirstP);
 
   const html = `
     <h2>${escapeHtml(stat.teacherDisplay)} ${lvlPill} ${branchPill}</h2>
     <dl>
-      <dt>周课时</dt><dd>${stat.hours.toFixed(1)} h</dd>
-      <dt>课程数</dt><dd>${stat.slots}</dd>
-      <dt>班级总人数</dt><dd>${stat.totalHead}</dd>
-      <dt>本期到课</dt><dd>${stat.present}</dd>
-      <dt>本期缺课</dt><dd>${stat.absent}</dd>
-      <dt>本期未点名</dt><dd>${stat.none}</dd>
-      <dt>本期出勤率</dt><dd>${pct(stat.attendanceRate)}</dd>
+      <dt>时段</dt><dd>${stat.slots}</dd>
+      <dt>科目</dt><dd>${stat.subjects.length ? escapeHtml(stat.subjects.join(', ')) : '-'}</dd>
+      <dt>年纪</dt><dd>${stat.grades.length ? escapeHtml(stat.grades.join(', ')) : '-'}</dd>
+      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+      <dt>本期出席</dt><dd><b style="font-size:16px;">${fmtNum(stat.present)}</b></dd>
+      <dt>本期缺课</dt><dd>${fmtNum(stat.absent)}</dd>
+      <dt>本期未点</dt><dd>${fmtNum(stat.none)}</dd>
+      <dt>出勤率</dt><dd>${pct(stat.rate)}</dd>
+      <dt>月环比</dt><dd>${trendBadge}</dd>
+      <dt>全期进步</dt><dd>${overallBadge}</dd>
     </dl>
 
-    <div class="matrix-toolbar">
-      <span>横轴：</span>
-      <span class="matrix-toggle" data-control="bucket">
-        <button type="button" data-val="month" class="active">按月</button>
-        <button type="button" data-val="week">按周</button>
-      </span>
-      <span style="margin-left:8px;">下方矩阵显示：</span>
-      <span class="matrix-toggle" data-control="value">
-        <button type="button" data-val="rate" class="active">出勤率</button>
-        <button type="button" data-val="count">P/总</button>
-      </span>
-    </div>
+    <h3>每月出席人次</h3>
+    <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
 
-    <h3 id="summary-h3">每${bucketWord()} 出勤汇总</h3>
-    <div id="summary-mount">${renderSummary()}</div>
+    <h3>按科目拆分（合计行在底部）</h3>
+    ${renderTeacherBreakdownTable(records, teacher, level, 'subject', '科目')}
 
-    <h3 id="matrix-h3">每个时段 × ${bucketWord()} 表现</h3>
-    <div id="matrix-mount">${renderMatrix()}</div>
+    <h3>按年纪拆分</h3>
+    ${renderTeacherBreakdownTable(records, teacher, level, 'grade', '年纪')}
+
+    <h3>按分行拆分</h3>
+    ${renderTeacherBreakdownTable(records, teacher, level, 'branch', '分行')}
 
     <div class="actions">
       <button id="modal-close" type="button">关闭</button>
@@ -1212,28 +1293,6 @@ function openTeacherModal(stat) {
   $('#modal-root').classList.add('show');
   state.modalOpen = true;
   $('#modal-close').addEventListener('click', closeModal);
-
-  function refreshAll() {
-    $('#summary-h3').textContent = `每${bucketWord()} 出勤汇总`;
-    $('#summary-mount').innerHTML = renderSummary();
-    $('#matrix-h3').textContent = `每个时段 × ${bucketWord()} 表现`;
-    $('#matrix-mount').innerHTML = renderMatrix();
-  }
-
-  $$('.matrix-toggle[data-control="bucket"] button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      matrixState.bucketBy = btn.getAttribute('data-val');
-      $$('.matrix-toggle[data-control="bucket"] button').forEach(b => b.classList.toggle('active', b === btn));
-      refreshAll();
-    });
-  });
-  $$('.matrix-toggle[data-control="value"] button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      matrixState.valueMode = btn.getAttribute('data-val');
-      $$('.matrix-toggle[data-control="value"] button').forEach(b => b.classList.toggle('active', b === btn));
-      $('#matrix-mount').innerHTML = renderMatrix();
-    });
-  });
 }
 
 // ===================================================================
@@ -1948,6 +2007,28 @@ function bindModalDismiss() {
   });
 }
 
+function bindExportPDF() {
+  const btn = $('#export-pdf-btn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (state.modalOpen) closeModal();
+    // Mark the visible view so @media print can pick only that one,
+    // even though sections normally stay mounted.
+    $$('.view').forEach(node => node.classList.remove('print-active'));
+    const activeId = `view-${state.view}`;
+    const active = document.getElementById(activeId);
+    if (active) active.classList.add('print-active');
+    // Let the layout settle before triggering the print dialog.
+    setTimeout(() => {
+      window.print();
+      // Clean up the marker after the dialog closes.
+      setTimeout(() => {
+        $$('.view').forEach(node => node.classList.remove('print-active'));
+      }, 200);
+    }, 50);
+  });
+}
+
 function startAutoRefresh() {
   setInterval(() => {
     if (document.hidden) return;
@@ -1964,6 +2045,7 @@ function init() {
   bindTabs();
   bindFilters();
   bindModalDismiss();
+  bindExportPDF();
   loadSchedule({ useCache: true });
   startAutoRefresh();
 }

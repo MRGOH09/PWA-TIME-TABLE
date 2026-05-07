@@ -51,6 +51,29 @@
   header.top h1 { margin: 0; font-size: 20px; }
   header.top p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
   header.top .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  header.top .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  #export-pdf-btn {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #export-pdf-btn:hover {
+    background: var(--accent);
+    color: #0b1220;
+    border-color: var(--accent);
+  }
 
   .tabs {
     display: flex;
@@ -658,6 +681,103 @@
     font-size: 14px;
   }
 
+  /* Print / PDF — clean light layout for paper / "Save as PDF" */
+  @media print {
+    @page { size: A4 landscape; margin: 10mm; }
+
+    :root {
+      --bg: #ffffff;
+      --panel: #ffffff;
+      --panel-2: #f3f4f6;
+      --border: #d1d5db;
+      --text: #111827;
+      --muted: #4b5563;
+    }
+
+    body {
+      background: white !important;
+      color: black !important;
+    }
+
+    /* Hide chrome that does not belong on paper */
+    .tabs,
+    .filters,
+    .modal-backdrop,
+    #export-pdf-btn,
+    .matrix-toolbar,
+    .legend,
+    .attendance-controls,
+    .actions { display: none !important; }
+
+    header.top { border: none; padding: 8px 0; }
+    header.top h1 { font-size: 16pt; }
+    header.top p, header.top .meta { font-size: 9pt; color: #4b5563; }
+
+    /* Force browsers to print background colors so the cell-status
+       tints actually show up in the PDF. */
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+
+    /* Show only the active view */
+    .view { display: none !important; }
+    .view.print-active { display: block !important; }
+
+    /* Don't clip wide content */
+    .month-matrix-wrap,
+    .teacher-table-wrap,
+    .gantt-timeline-wrap,
+    .heatmap-wrap,
+    .underperf-wrap { overflow: visible !important; }
+
+    /* Tables / cards: white background, dark text */
+    .summary .card,
+    table.data,
+    table.month-matrix,
+    .gantt,
+    .branch-title,
+    .subject-trend-card,
+    .chart-card {
+      background: white !important;
+      color: black !important;
+      border-color: #d1d5db !important;
+      box-shadow: none !important;
+    }
+    table.data thead th,
+    table.month-matrix thead th {
+      background: #f3f4f6 !important;
+      color: #1f2937 !important;
+    }
+
+    /* Cell tints — keep visible but lighter for ink */
+    table.month-matrix tbody td.cell-empty { color: #6b7280 !important; }
+    table.month-matrix tbody td.cell-unmarked { background: #f3f4f6 !important; color: #6b7280 !important; }
+    table.month-matrix tbody td.cell-full { background: #dbeafe !important; color: #0c4a6e !important; }
+    table.month-matrix tbody td.cell-high { background: #d1fae5 !important; color: #065f46 !important; }
+    table.month-matrix tbody td.cell-mid  { background: #fef3c7 !important; color: #78350f !important; }
+    table.month-matrix tbody td.cell-low  { background: #fee2e2 !important; color: #7f1d1d !important; }
+
+    /* Page break hints */
+    .branch-block,
+    .subject-section-title,
+    .chart-card,
+    h3 { page-break-inside: avoid; break-inside: avoid; }
+
+    /* Bars on the Gantt: solid darker colors so they show in print */
+    .bar.unmarked { background: #9ca3af !important; color: #111827 !important; }
+    .bar.low      { background: #dc2626 !important; color: #fff !important; }
+    .bar.mid      { background: #d97706 !important; color: #fff !important; }
+    .bar.high     { background: #059669 !important; color: #fff !important; }
+    .bar.full     { background: #2563eb !important; color: #fff !important; }
+
+    /* Trend arrows */
+    .trend-up   { color: #059669 !important; }
+    .trend-down { color: #dc2626 !important; }
+    .trend-flat { color: #6b7280 !important; }
+  }
+
   /* Mobile tweaks */
   @media (max-width: 720px) {
     :root {
@@ -675,9 +795,14 @@
 <body>
 
 <header class="top">
-  <h1>周补习时间表 Dashboard</h1>
-  <p>查看每个分行、每个礼拜、每位老师的课表与出勤表现</p>
-  <div class="meta" id="meta">数据加载中…</div>
+  <div class="top-row">
+    <div>
+      <h1>周补习时间表 Dashboard</h1>
+      <p>查看每个分行、每个礼拜、每位老师的课表与出勤表现</p>
+      <div class="meta" id="meta">数据加载中…</div>
+    </div>
+    <button id="export-pdf-btn" type="button" title="把当前 view 打印 / 另存为 PDF">📄 导出 PDF</button>
+  </div>
 </header>
 
 <nav class="tabs" id="tabs">
