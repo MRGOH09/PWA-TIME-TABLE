@@ -1182,9 +1182,11 @@ function openTeacherModal(stat) {
 function computeSubjectStats(records, level) {
   const filtered = level ? records.filter(r => r.level === level) : records;
   const map = new Map();
+  const monthSet = new Set();
 
   for (const r of filtered) {
     if (!r.subject) continue;
+    if (r.month) monthSet.add(r.month);
     const key = r.subject;
     if (!map.has(key)) {
       map.set(key, {
@@ -1194,7 +1196,8 @@ function computeSubjectStats(records, level) {
         grades: new Set(),
         branches: new Set(),
         present: 0, absent: 0, none: 0,
-        slotClassSize: new Map(),  // slotKey -> max classSize
+        slotClassSize: new Map(),
+        months: {},                    // month -> { present, absent, none }
         monthPMap: new Map(),
       });
     }
@@ -1212,11 +1215,17 @@ function computeSubjectStats(records, level) {
     s.absent += r.absent || 0;
     s.none += r.none || 0;
     if (r.month) {
+      if (!s.months[r.month]) s.months[r.month] = { present: 0, absent: 0, none: 0 };
+      s.months[r.month].present += r.present || 0;
+      s.months[r.month].absent += r.absent || 0;
+      s.months[r.month].none += r.none || 0;
       s.monthPMap.set(r.month, (s.monthPMap.get(r.month) || 0) + (r.present || 0));
     }
   }
 
-  const out = [];
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+
+  const stats = [];
   for (const s of map.values()) {
     const total = s.present + s.absent + s.none;
     const markedSome = (s.present + s.absent) > 0;
@@ -1224,7 +1233,7 @@ function computeSubjectStats(records, level) {
     let classSizeSum = 0;
     s.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(s.monthPMap);
-    out.push({
+    stats.push({
       subject: s.subject,
       slots: s.slotKeys.size,
       teachers: Array.from(s.teachers).sort(),
@@ -1236,6 +1245,7 @@ function computeSubjectStats(records, level) {
       total,
       classSize: classSizeSum,
       rate,
+      months: s.months,
       monthPMap: s.monthPMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
@@ -1243,8 +1253,8 @@ function computeSubjectStats(records, level) {
     });
   }
 
-  out.sort((a, b) => b.present - a.present);
-  return out;
+  stats.sort((a, b) => b.present - a.present);
+  return { stats, months };
 }
 
 function computeSubjectBreakdown(records, subject, level, dimension) {
@@ -1252,15 +1262,18 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
     r.subject === subject && (!level || r.level === level) && r[dimension]
   );
   const map = new Map();
+  const monthSet = new Set();
 
   for (const r of filtered) {
     const key = r[dimension];
+    if (r.month) monthSet.add(r.month);
     if (!map.has(key)) {
       map.set(key, {
         key,
         slotKeys: new Set(),
         present: 0, absent: 0, none: 0,
         slotClassSize: new Map(),
+        months: {},
         monthPMap: new Map(),
       });
     }
@@ -1275,11 +1288,17 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
     e.absent += r.absent || 0;
     e.none += r.none || 0;
     if (r.month) {
+      if (!e.months[r.month]) e.months[r.month] = { present: 0, absent: 0, none: 0 };
+      e.months[r.month].present += r.present || 0;
+      e.months[r.month].absent += r.absent || 0;
+      e.months[r.month].none += r.none || 0;
       e.monthPMap.set(r.month, (e.monthPMap.get(r.month) || 0) + (r.present || 0));
     }
   }
 
-  const out = [];
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+
+  const stats = [];
   for (const e of map.values()) {
     const total = e.present + e.absent + e.none;
     const markedSome = (e.present + e.absent) > 0;
@@ -1287,7 +1306,7 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
     let classSizeSum = 0;
     e.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(e.monthPMap);
-    out.push({
+    stats.push({
       key: e.key,
       slots: e.slotKeys.size,
       present: e.present,
@@ -1296,38 +1315,53 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
       total,
       classSize: classSizeSum,
       rate,
+      months: e.months,
+      monthPMap: e.monthPMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
     });
   }
 
-  // Sort: gradeOrder for grade dimension, otherwise by present desc
   if (dimension === 'grade') {
-    out.sort((a, b) => gradeOrderOf(a.key) - gradeOrderOf(b.key));
+    stats.sort((a, b) => gradeOrderOf(a.key) - gradeOrderOf(b.key));
   } else {
-    out.sort((a, b) => b.present - a.present);
+    stats.sort((a, b) => b.present - a.present);
   }
-  return out;
+  return { stats, months };
+}
+
+function monthCellHtml(monthData) {
+  if (!monthData || (monthData.present + monthData.absent + monthData.none === 0)) {
+    return `<td class="num cell-empty">—</td>`;
+  }
+  if ((monthData.present + monthData.absent) === 0) {
+    return `<td class="num cell-unmarked" title="未点 N=${monthData.none}">未点</td>`;
+  }
+  const total = monthData.present + monthData.absent + monthData.none;
+  const status = statusForAttendance(monthData.present, monthData.absent, monthData.none);
+  const rate = monthData.present / total;
+  const tooltip = `P ${monthData.present}  A ${monthData.absent}  N ${monthData.none}  rate ${(rate * 100).toFixed(1)}%`;
+  return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${fmtNum(monthData.present)}</td>`;
 }
 
 function renderSubjectsView() {
   const records = filteredRecords();
 
   // Summary cards (de-emphasize rate; lead with P count)
-  const allStats = computeSubjectStats(records);
-  const secondary = allStats.filter(s => records.find(r => r.subject === s.subject && r.level === '中学'));
-  const primary   = allStats.filter(s => records.find(r => r.subject === s.subject && r.level === '小学'));
-  const totalP = allStats.reduce((a, s) => a + s.present, 0);
-  const totalA = allStats.reduce((a, s) => a + s.absent, 0);
-  const totalN = allStats.reduce((a, s) => a + s.none, 0);
+  const all = computeSubjectStats(records);
+  const sec = computeSubjectStats(records, '中学');
+  const pri = computeSubjectStats(records, '小学');
+  const totalP = all.stats.reduce((a, s) => a + s.present, 0);
+  const totalA = all.stats.reduce((a, s) => a + s.absent, 0);
+  const totalN = all.stats.reduce((a, s) => a + s.none, 0);
   const totalAll = totalP + totalA + totalN;
   const overallRate = (totalP + totalA) > 0 && totalAll > 0 ? totalP / totalAll : null;
 
   const cards = [
-    { label: '科目总数', value: allStats.length },
-    { label: '中学科目', value: secondary.length },
-    { label: '小学科目', value: primary.length },
+    { label: '科目总数', value: all.stats.length },
+    { label: '中学科目', value: sec.stats.length },
+    { label: '小学科目', value: pri.stats.length },
     { label: '本期总出席', value: fmtNum(totalP), cls: 'high' },
     { label: '本期总缺课', value: fmtNum(totalA), cls: 'low' },
     { label: '本期总未点', value: fmtNum(totalN), cls: 'unmarked' },
@@ -1341,15 +1375,15 @@ function renderSubjectsView() {
   `).join('');
 
   $('#subjects-secondary-wrap').innerHTML = `
-    <div class="subject-section-title">中学科目 <span class="small">按总出席降序</span></div>
+    <div class="subject-section-title">中学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '中学')}
   `;
   $('#subjects-primary-wrap').innerHTML = `
-    <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序</span></div>
+    <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '小学')}
   `;
 
-  $$('#view-subjects table.data tbody tr.clickable').forEach(tr => {
+  $$('#view-subjects table tbody tr.clickable').forEach(tr => {
     tr.addEventListener('click', () => {
       const subject = tr.getAttribute('data-subject');
       const level = tr.getAttribute('data-level');
@@ -1359,39 +1393,43 @@ function renderSubjectsView() {
 }
 
 function renderSubjectLeaderboard(records, level) {
-  const stats = computeSubjectStats(records, level);
+  const { stats, months } = computeSubjectStats(records, level);
   if (!stats.length) {
     return `<div class="empty-msg">没有 ${escapeHtml(level)} 科目数据</div>`;
   }
+  if (!months.length) {
+    return `<div class="empty-msg">没有月份数据</div>`;
+  }
+
+  const monthHeaders = months
+    .map(m => `<th class="num">${escapeHtml(m.split('.')[1] || m)}</th>`)
+    .join('');
 
   const rows = stats.map(s => {
+    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
     return `<tr class="clickable" data-subject="${escapeHtml(s.subject)}" data-level="${escapeHtml(level)}">
       <td class="col-key">${escapeHtml(s.subject)}</td>
       <td class="num">${s.slots}</td>
       <td class="num">${s.teachers.length}</td>
-      <td class="num">${fmtNum(s.classSize)}</td>
+      ${monthCells}
       <td class="num"><b>${fmtNum(s.present)}</b></td>
-      <td class="num">${fmtNum(s.absent)}</td>
-      <td class="num">${fmtNum(s.none)}</td>
       <td class="num">${pct(s.rate)}</td>
       <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
     </tr>`;
   }).join('');
 
-  return `<table class="data">
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>科目</th>
-      <th class="num">课时段</th>
-      <th class="num">老师数</th>
-      <th class="num">班级总人数</th>
-      <th class="num">出席</th>
-      <th class="num">缺课</th>
-      <th class="num">未点</th>
+      <th class="num">时段</th>
+      <th class="num">老师</th>
+      ${monthHeaders}
+      <th class="num">总出席</th>
       <th class="num">出勤率</th>
-      <th>趋势 (出席 月环比)</th>
+      <th>趋势</th>
     </tr></thead>
     <tbody>${rows}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 function renderSubjectTrendChart(monthPMap) {
@@ -1437,67 +1475,75 @@ function renderSubjectTrendChart(monthPMap) {
 }
 
 function renderSubjectBreakdownTable(records, subject, level, dimension, label) {
-  const stats = computeSubjectBreakdown(records, subject, level, dimension);
+  const { stats, months } = computeSubjectBreakdown(records, subject, level, dimension);
   if (!stats.length) return '<p style="color:var(--muted);font-size:12px;">没有数据</p>';
+  if (!months.length) return '<p style="color:var(--muted);font-size:12px;">没有月份数据</p>';
 
-  const rows = stats.map(s => `<tr>
-    <td class="col-key">${escapeHtml(s.key)}</td>
-    <td class="num">${s.slots}</td>
-    <td class="num">${fmtNum(s.classSize)}</td>
-    <td class="num"><b>${fmtNum(s.present)}</b></td>
-    <td class="num">${fmtNum(s.absent)}</td>
-    <td class="num">${fmtNum(s.none)}</td>
-    <td class="num">${pct(s.rate)}</td>
-    <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
-  </tr>`).join('');
+  const monthHeaders = months
+    .map(m => `<th class="num">${escapeHtml(m.split('.')[1] || m)}</th>`)
+    .join('');
 
+  const rows = stats.map(s => {
+    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
+    return `<tr>
+      <td class="col-key">${escapeHtml(s.key)}</td>
+      <td class="num">${s.slots}</td>
+      ${monthCells}
+      <td class="num"><b>${fmtNum(s.present)}</b></td>
+      <td class="num">${pct(s.rate)}</td>
+      <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
+    </tr>`;
+  }).join('');
+
+  // 合计 row — also broken down by month
+  const aggMonthly = {};
+  for (const m of months) {
+    aggMonthly[m] = { present: 0, absent: 0, none: 0 };
+    for (const s of stats) {
+      const md = s.months[m];
+      if (md) {
+        aggMonthly[m].present += md.present;
+        aggMonthly[m].absent += md.absent;
+        aggMonthly[m].none += md.none;
+      }
+    }
+  }
+  const aggMonthCells = months.map(m => monthCellHtml(aggMonthly[m])).join('');
   const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
-  const aggClassSize = stats.reduce((a, s) => a + s.classSize, 0);
   const aggP = stats.reduce((a, s) => a + s.present, 0);
   const aggA = stats.reduce((a, s) => a + s.absent, 0);
   const aggN = stats.reduce((a, s) => a + s.none, 0);
   const aggTotal = aggP + aggA + aggN;
   const aggRate = (aggP + aggA) > 0 && aggTotal > 0 ? aggP / aggTotal : null;
   const aggMonthPMap = new Map();
-  for (const s of computeSubjectBreakdown(records, subject, level, dimension)) {
-    // Skip — we'll compute aggregate trend from raw records
-  }
-  const subjectStats = computeSubjectStats(
-    records.filter(r => (!level || r.level === level)),
-    level
-  ).find(x => x.subject === subject);
-  const aggTrend = subjectStats ? subjectStats.trendDelta : null;
-  const aggPrev = subjectStats ? subjectStats.prevP : null;
+  for (const m of months) aggMonthPMap.set(m, aggMonthly[m].present);
+  const aggTrend = monthDeltaPair(aggMonthPMap);
 
   const aggRow = `<tr class="agg-row">
     <td>合计</td>
     <td class="num">${aggSlots}</td>
-    <td class="num">${fmtNum(aggClassSize)}</td>
+    ${aggMonthCells}
     <td class="num">${fmtNum(aggP)}</td>
-    <td class="num">${fmtNum(aggA)}</td>
-    <td class="num">${fmtNum(aggN)}</td>
     <td class="num">${pct(aggRate)}</td>
-    <td class="col-trend">${formatCountTrend(aggTrend, aggPrev)}</td>
+    <td class="col-trend">${formatCountTrend(aggTrend.delta, aggTrend.prevP)}</td>
   </tr>`;
 
-  return `<table class="data">
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>${escapeHtml(label)}</th>
-      <th class="num">课时段</th>
-      <th class="num">班级总人数</th>
-      <th class="num">出席</th>
-      <th class="num">缺课</th>
-      <th class="num">未点</th>
+      <th class="num">时段</th>
+      ${monthHeaders}
+      <th class="num">总出席</th>
       <th class="num">出勤率</th>
-      <th>趋势 (出席 月环比)</th>
+      <th>趋势</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 function openSubjectModal(subject, level) {
   const records = filteredRecords();
-  const stat = computeSubjectStats(records, level).find(s => s.subject === subject);
+  const stat = computeSubjectStats(records, level).stats.find(s => s.subject === subject);
   if (!stat) return;
 
   const lvlPill = level === '中学'
