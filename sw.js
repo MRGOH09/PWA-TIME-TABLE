@@ -1,4 +1,4 @@
-const CACHE = 'tuition-shell-v1';
+const CACHE = 'tuition-shell-v2';
 const ASSETS = [
   '/',
   '/index.html',
