@@ -694,10 +694,46 @@
       --muted: #4b5563;
     }
 
+    /* Force fonts that actually contain Chinese glyphs to render first.
+       Without this, the print pipeline keeps the latin -apple-system stack
+       and silently drops Chinese characters. */
+    * {
+      font-family: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB",
+                   "Heiti SC", "Source Han Sans CN", "Noto Sans CJK SC",
+                   -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+
     body {
       background: white !important;
       color: black !important;
     }
+
+    /* When a per-view summary is showing, hide the top-level project summary
+       to avoid duplicate card rows. */
+    body.print-hide-top-summary > #summary { display: none !important; }
+
+    /* Modal-only print mode — dashboard fades out and only the modal prints.
+       Used by the per-teacher / per-subject export buttons inside the modal. */
+    body.print-modal-only > *:not(#modal-root) { display: none !important; }
+    body.print-modal-only #modal-root {
+      position: static !important;
+      background: transparent !important;
+      display: block !important;
+      padding: 0 !important;
+      inset: auto !important;
+    }
+    body.print-modal-only #modal-content {
+      max-width: none !important;
+      width: 100% !important;
+      max-height: none !important;
+      overflow: visible !important;
+      background: white !important;
+      color: black !important;
+      border: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+    }
+    body.print-modal-only .actions { display: none !important; }
 
     /* Hide chrome that does not belong on paper */
     .tabs,

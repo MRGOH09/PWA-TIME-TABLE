@@ -1283,6 +1283,7 @@ function openTeacherModal(teacher, level) {
     ${renderTeacherBreakdownTable(records, teacher, level, 'branch', '分行')}
 
     <div class="actions">
+      <button id="modal-export-pdf" type="button">📄 导出此老师 PDF</button>
       <button id="modal-close" type="button">关闭</button>
     </div>
   `;
@@ -1293,6 +1294,7 @@ function openTeacherModal(teacher, level) {
   $('#modal-root').classList.add('show');
   state.modalOpen = true;
   $('#modal-close').addEventListener('click', closeModal);
+  $('#modal-export-pdf').addEventListener('click', exportModalPDF);
 }
 
 // ===================================================================
@@ -1720,6 +1722,7 @@ function openSubjectModal(subject, level) {
     ${renderSubjectBreakdownTable(records, subject, level, 'branch', '分行')}
 
     <div class="actions">
+      <button id="modal-export-pdf" type="button">📄 导出此科目 PDF</button>
       <button id="modal-close" type="button">关闭</button>
     </div>
   `;
@@ -1730,6 +1733,7 @@ function openSubjectModal(subject, level) {
   $('#modal-root').classList.add('show');
   state.modalOpen = true;
   $('#modal-close').addEventListener('click', closeModal);
+  $('#modal-export-pdf').addEventListener('click', exportModalPDF);
 }
 
 // ===================================================================
@@ -2018,15 +2022,32 @@ function bindExportPDF() {
     const activeId = `view-${state.view}`;
     const active = document.getElementById(activeId);
     if (active) active.classList.add('print-active');
-    // Let the layout settle before triggering the print dialog.
+
+    // teachers and subjects views render their own summary cards inside
+    // the view section, so the project-wide #summary is redundant on paper.
+    const viewsWithOwnSummary = ['teachers', 'subjects'];
+    document.body.classList.toggle('print-hide-top-summary', viewsWithOwnSummary.includes(state.view));
+
     setTimeout(() => {
       window.print();
-      // Clean up the marker after the dialog closes.
       setTimeout(() => {
         $$('.view').forEach(node => node.classList.remove('print-active'));
+        document.body.classList.remove('print-hide-top-summary');
       }, 200);
     }, 50);
   });
+}
+
+function exportModalPDF() {
+  // Print only the currently open modal contents. The dashboard chrome,
+  // tabs, filters, header etc. are all hidden by .print-modal-only.
+  document.body.classList.add('print-modal-only');
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => {
+      document.body.classList.remove('print-modal-only');
+    }, 200);
+  }, 50);
 }
 
 function startAutoRefresh() {
