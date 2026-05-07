@@ -446,6 +446,16 @@ function monthDeltaPair(monthPMap) {
   return { lastP, prevP, delta: lastP - prevP, lastMonth, prevMonth };
 }
 
+function monthFirstLastDelta(monthPMap) {
+  const sorted = Array.from(monthPMap.keys()).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  if (sorted.length < 2) return { firstP: null, lastP: null, delta: null };
+  const firstMonth = sorted[0];
+  const lastMonth = sorted[sorted.length - 1];
+  const firstP = monthPMap.get(firstMonth);
+  const lastP = monthPMap.get(lastMonth);
+  return { firstP, lastP, delta: lastP - firstP, firstMonth, lastMonth };
+}
+
 // ===================================================================
 // Data loading + localStorage cache
 // ===================================================================
@@ -1284,6 +1294,7 @@ function computeSubjectStats(records, level) {
     let classSizeSum = 0;
     s.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(s.monthPMap);
+    const overall = monthFirstLastDelta(s.monthPMap);
     stats.push({
       subject: s.subject,
       slots: s.slotKeys.size,
@@ -1301,6 +1312,9 @@ function computeSubjectStats(records, level) {
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
+      overallDelta: overall.delta,
+      overallFirstP: overall.firstP,
+      overallLastP: overall.lastP,
     });
   }
 
@@ -1357,6 +1371,7 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
     let classSizeSum = 0;
     e.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(e.monthPMap);
+    const overall = monthFirstLastDelta(e.monthPMap);
     stats.push({
       key: e.key,
       slots: e.slotKeys.size,
@@ -1371,6 +1386,9 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
+      overallDelta: overall.delta,
+      overallFirstP: overall.firstP,
+      overallLastP: overall.lastP,
     });
   }
 
@@ -1466,6 +1484,7 @@ function renderSubjectLeaderboard(records, level) {
       <td class="num"><b>${fmtNum(s.present)}</b></td>
       <td class="num">${pct(s.rate)}</td>
       <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
+      <td class="col-trend">${formatCountTrend(s.overallDelta, s.overallFirstP)}</td>
     </tr>`;
   }).join('');
 
@@ -1477,7 +1496,8 @@ function renderSubjectLeaderboard(records, level) {
       ${monthHeaders}
       <th class="num">总出席</th>
       <th class="num">出勤率</th>
-      <th>趋势</th>
+      <th title="最近两个月对比">月环比</th>
+      <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
@@ -1543,6 +1563,7 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
       <td class="num"><b>${fmtNum(s.present)}</b></td>
       <td class="num">${pct(s.rate)}</td>
       <td class="col-trend">${formatCountTrend(s.trendDelta, s.prevP)}</td>
+      <td class="col-trend">${formatCountTrend(s.overallDelta, s.overallFirstP)}</td>
     </tr>`;
   }).join('');
 
@@ -1569,6 +1590,7 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
   const aggMonthPMap = new Map();
   for (const m of months) aggMonthPMap.set(m, aggMonthly[m].present);
   const aggTrend = monthDeltaPair(aggMonthPMap);
+  const aggOverall = monthFirstLastDelta(aggMonthPMap);
 
   const aggRow = `<tr class="agg-row">
     <td>合计</td>
@@ -1577,6 +1599,7 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
     <td class="num">${fmtNum(aggP)}</td>
     <td class="num">${pct(aggRate)}</td>
     <td class="col-trend">${formatCountTrend(aggTrend.delta, aggTrend.prevP)}</td>
+    <td class="col-trend">${formatCountTrend(aggOverall.delta, aggOverall.firstP)}</td>
   </tr>`;
 
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
@@ -1586,7 +1609,8 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
       ${monthHeaders}
       <th class="num">总出席</th>
       <th class="num">出勤率</th>
-      <th>趋势</th>
+      <th title="最近两个月对比">月环比</th>
+      <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
   </table></div>`;
@@ -1607,6 +1631,7 @@ function openSubjectModal(subject, level) {
     : '';
 
   const trendBadge = formatCountTrend(stat.trendDelta, stat.prevP);
+  const overallBadge = formatCountTrend(stat.overallDelta, stat.overallFirstP);
 
   const html = `
     <h2>科目 ${escapeHtml(stat.subject)} ${lvlPill} ${branchPill}</h2>
@@ -1620,6 +1645,7 @@ function openSubjectModal(subject, level) {
       <dt>本期未点</dt><dd>${fmtNum(stat.none)}</dd>
       <dt>出勤率</dt><dd>${pct(stat.rate)}</dd>
       <dt>月环比</dt><dd>${trendBadge}</dd>
+      <dt>全期进步</dt><dd>${overallBadge}</dd>
     </dl>
 
     <h3>每月出席人次</h3>
