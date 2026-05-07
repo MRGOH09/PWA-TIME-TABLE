@@ -7,6 +7,19 @@
 <title>周补习时间表 Dashboard</title>
 <link rel="manifest" href="/manifest.json" />
 <style>
+  /* CJK font wedged in via unicode-range so the browser picks PingFang SC
+     ONLY for Chinese characters and leaves Latin / digits to the system font.
+     Without this, forcing PingFang SC on everything makes Chrome rasterize
+     Latin glyphs in the print output (the PDF then has only arrows). */
+  @font-face {
+    font-family: "AppCJK";
+    src: local("PingFang SC"), local("Hiragino Sans GB"),
+         local("Microsoft YaHei"), local("Heiti SC"),
+         local("Source Han Sans CN"), local("Noto Sans CJK SC");
+    unicode-range: U+3000-30FF, U+3400-4DBF, U+4E00-9FFF,
+                   U+F900-FAFF, U+FF00-FFEF;
+  }
+
   :root {
     --bg: #0f172a;
     --panel: #1e293b;
@@ -38,7 +51,8 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "AppCJK",
+                 "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
@@ -694,18 +708,15 @@
       --muted: #4b5563;
     }
 
-    /* Force fonts that actually contain Chinese glyphs to render first.
-       Without this, the print pipeline keeps the latin -apple-system stack
-       and silently drops Chinese characters. */
-    * {
-      font-family: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB",
-                   "Heiti SC", "Source Han Sans CN", "Noto Sans CJK SC",
-                   -apple-system, BlinkMacSystemFont, sans-serif !important;
-    }
-
+    /* Per-character font fallback is handled by the @font-face AppCJK
+       rule with unicode-range. Don't force a single font on every element
+       in print — that nukes Latin glyph subsets and the PDF ends up with
+       only arrows visible. The body declaration is enough. */
     body {
       background: white !important;
       color: black !important;
+      font-family: -apple-system, BlinkMacSystemFont, "AppCJK",
+                   "PingFang SC", "Microsoft YaHei", sans-serif !important;
     }
 
     /* When a per-view summary is showing, hide the top-level project summary
