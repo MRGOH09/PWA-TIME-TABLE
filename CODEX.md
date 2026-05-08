@@ -1600,8 +1600,30 @@ Required Lark / Vercel setup:
     or `ALLOWED_EMAILS=<comma-separated allowed emails>`
 * Optional env vars:
   * `AUTH_SUCCESS_URL=https://pwa-time-table.vercel.app/`
+  * `LARK_AUTH_TABLE_ID=<Lark Base permission table id>`
   * `LARK_OAUTH_SCOPE=<only if Lark asks for explicit login scopes>`
   * `LARK_OAUTH_AUTHORIZE_URL=<only if Lark changes the authorize URL>`
+
+Lark Base permission table mode:
+
+* If `LARK_AUTH_TABLE_ID` is set, `/api/auth_callback` uses that table as
+  the dashboard whitelist.
+* Required fields in that table:
+  * `姓名`
+  * `Open ID`
+  * `Union ID`
+  * `User ID`
+  * `Email`
+  * `可以进入`
+  * `状态`
+  * `最后登录`
+  * `备注`
+* A first-time login that is not in the permission table creates a pending
+  row automatically with `可以进入 = No` and `状态 = 待批准`.
+* Admin approval happens inside Lark Base by changing `可以进入` to `Yes`.
+  The next login then receives the dashboard session cookie.
+* Vercel env whitelists (`ALLOWED_LARK_OPEN_IDS` / `ALLOWED_EMAILS`) still
+  act as a bootstrap bypass for admins.
 
 Testing rule:
 
