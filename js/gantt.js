@@ -565,6 +565,75 @@ function weekHeadCellHtml(weekData) {
   return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
 }
 
+function classCountCellHtml(data) {
+  if (!data || (!data.effectiveSessions && !data.unmarkedSessions)) {
+    return `<td class="num cell-empty">—</td>`;
+  }
+  const tooltip = [
+    `有效课 ${data.effectiveSessions || 0}`,
+    `未点名待确认 ${data.unmarkedSessions || 0}`,
+    `全部课 ${data.sessions || 0}`,
+    `P ${data.present || 0}`,
+    `A ${data.absent || 0}`,
+    `N ${data.none || 0}`,
+  ].join('  ');
+  if (!data.effectiveSessions) {
+    return `<td class="num cell-unmarked" title="${escapeHtml(tooltip)}">待${data.unmarkedSessions || 0}</td>`;
+  }
+  const suffix = data.unmarkedSessions ? `+待${data.unmarkedSessions}` : '';
+  return `<td class="num" title="${escapeHtml(tooltip)}">${fmtNum(data.effectiveSessions)}${escapeHtml(suffix)}</td>`;
+}
+
+function computeTeacherClassContributions(records, teacher, level) {
+  const filtered = records.filter(r =>
+    r.teacher === teacher && (!level || r.level === level) && r.day && r.timeRange
+  );
+  const slotMap = new Map();
+  const monthSet = new Set();
+  const weekSet = new Set();
+
+  for (const r of filtered) {
+    const sk = slotKey(r);
+    if (!slotMap.has(sk)) {
+      slotMap.set(sk, {
+        key: sk,
+        branch: r.branch,
+        day: r.day,
+        dayOrder: r.dayOrder,
+        timeRange: r.timeRange,
+        startMinutes: r.startMinutes,
+        subject: r.subject,
+        grade: r.grade,
+        level: r.level,
+        classSize: 0,
+        months: {},
+        weeks: {},
+      });
+    }
+    const slot = slotMap.get(sk);
+    if ((r.classSize || 0) > slot.classSize) slot.classSize = r.classSize || 0;
+    if (r.month) {
+      monthSet.add(r.month);
+      addRecordToMetricBucket(ensureMetricBucket(slot.months, r.month), r);
+    }
+    const wk = weekOfRecord(r);
+    if (wk) {
+      weekSet.add(wk);
+      addRecordToMetricBucket(ensureMetricBucket(slot.weeks, wk), r);
+    }
+  }
+
+  const slots = Array.from(slotMap.values()).sort((a, b) =>
+    (a.dayOrder - b.dayOrder)
+    || ((a.startMinutes || 0) - (b.startMinutes || 0))
+    || String(a.subject || '').localeCompare(String(b.subject || ''))
+    || String(a.grade || '').localeCompare(String(b.grade || ''))
+  );
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const weeks = Array.from(weekSet).sort((a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
+  return { slots, months, weeks };
+}
+
 // ===================================================================
 // Data loading + localStorage cache
 // ===================================================================
@@ -1251,11 +1320,11 @@ function renderTeachersView() {
   $('#teachers-table-wrap').innerHTML = `
     <div class="subject-section-title">中学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '中学')}
-    <div class="subject-section-title" style="margin-top:18px;">中学老师周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title" style="margin-top:18px;">中学老师周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
     ${renderTeacherWeekLeaderboard(records, '中学')}
     <div class="subject-section-title primary" style="margin-top:18px;">小学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '小学')}
-    <div class="subject-section-title primary" style="margin-top:18px;">小学老师周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title primary" style="margin-top:18px;">小学老师周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
     ${renderTeacherWeekLeaderboard(records, '小学')}
   `;
   // Heatmap section is no longer used in the teachers view; clear it so a previous render does not linger.
@@ -1352,7 +1421,7 @@ function renderTeacherWeekLeaderboard(records, level) {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周统计单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
+  <div class="matrix-hint">周平均人数单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
 }
 
 function renderTeacherBreakdownTable(records, teacher, level, dimension, label) {
@@ -1493,6 +1562,57 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
   </table></div>`;
 }
 
+function renderTeacherClassContributionTable(records, teacher, level, bucketBy) {
+  const { slots, months, weeks } = computeTeacherClassContributions(records, teacher, level);
+  const buckets = bucketBy === 'month' ? months : weeks;
+  if (!slots.length) return '<p style="color:var(--muted);font-size:12px;">没有班级数据</p>';
+  if (!buckets.length) return '<p style="color:var(--muted);font-size:12px;">没有课数数据</p>';
+
+  const headers = buckets
+    .map(b => {
+      const label = bucketBy === 'month' ? (String(b).split('.')[1] || b) : weekLabel(b);
+      return `<th class="num" title="${escapeHtml(b)}">${escapeHtml(label)}</th>`;
+    })
+    .join('');
+
+  const rows = slots.map(slot => {
+    const bucketMap = bucketBy === 'month' ? slot.months : slot.weeks;
+    const cells = buckets.map(b => classCountCellHtml(bucketMap[b])).join('');
+    let effectiveTotal = 0;
+    let pendingTotal = 0;
+    for (const b of buckets) {
+      const data = bucketMap[b];
+      if (!data) continue;
+      effectiveTotal += data.effectiveSessions || 0;
+      pendingTotal += data.unmarkedSessions || 0;
+    }
+    return `<tr>
+      <td>${escapeHtml(slot.day)}</td>
+      <td>${escapeHtml(slot.timeRange)}</td>
+      <td>${escapeHtml(slot.subject)} ${escapeHtml(slot.grade)}</td>
+      <td>${escapeHtml(slot.branch || '-')}</td>
+      <td class="num">${fmtNum(slot.classSize)}</td>
+      ${cells}
+      <td class="num"><b>${fmtNum(effectiveTotal)}</b>${pendingTotal ? ` <span class="trend-flat">待${fmtNum(pendingTotal)}</span>` : ''}</td>
+    </tr>`;
+  }).join('');
+
+  const label = bucketBy === 'month' ? '月课数' : '周课数';
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
+    <thead><tr>
+      <th>礼拜</th>
+      <th>时间</th>
+      <th>班级</th>
+      <th>分行</th>
+      <th class="num">人数</th>
+      ${headers}
+      <th class="num">有效${label}</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>
+  <div class="matrix-hint">${label} = 每一班贡献的有效课次数；待N = 有 ${bucketBy === 'month' ? '该月' : '该周'}未点名课，需要确认后才适合纳入结算。</div>`;
+}
+
 function openTeacherModal(teacher, level) {
   const records = filteredRecords();
   const stat = computeTeacherStats(records, level).stats.find(s => s.teacher === teacher);
@@ -1531,17 +1651,23 @@ function openTeacherModal(teacher, level) {
     <h3>每周实际平均人数</h3>
     <div class="subject-trend-card">${renderWeekHeadChart(stat.weekAvgMap)}</div>
 
+    <h3>每班课数贡献（月）</h3>
+    ${renderTeacherClassContributionTable(records, teacher, level, 'month')}
+
+    <h3>每班课数贡献（周）</h3>
+    ${renderTeacherClassContributionTable(records, teacher, level, 'week')}
+
     <h3>按科目拆分（合计行在底部）</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'subject', '科目')}
-    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'subject', '科目周统计')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'subject', '科目周平均人数')}
 
     <h3>按年纪拆分</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'grade', '年纪')}
-    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'grade', '年纪周统计')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'grade', '年纪周平均人数')}
 
     <h3>按分行拆分</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'branch', '分行')}
-    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'branch', '分行周统计')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'branch', '分行周平均人数')}
 
     <div class="actions">
       <button id="modal-export-pdf" type="button">📄 导出此老师 PDF</button>
@@ -1802,13 +1928,13 @@ function renderSubjectsView() {
   $('#subjects-secondary-wrap').innerHTML = `
     <div class="subject-section-title">中学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '中学')}
-    <div class="subject-section-title" style="margin-top:18px;">中学科目周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title" style="margin-top:18px;">中学科目周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
     ${renderSubjectWeekLeaderboard(records, '中学')}
   `;
   $('#subjects-primary-wrap').innerHTML = `
     <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '小学')}
-    <div class="subject-section-title primary" style="margin-top:18px;">小学科目周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title primary" style="margin-top:18px;">小学科目周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
     ${renderSubjectWeekLeaderboard(records, '小学')}
   `;
 
@@ -1897,7 +2023,7 @@ function renderSubjectWeekLeaderboard(records, level) {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周统计单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
+  <div class="matrix-hint">周平均人数单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
 }
 
 function renderSubjectTrendChart(monthPMap) {
@@ -2162,15 +2288,15 @@ function openSubjectModal(subject, level) {
 
     <h3>按老师拆分（合计行在底部）</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'teacherDisplay', '老师')}
-    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'teacherDisplay', '老师周统计')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'teacherDisplay', '老师周平均人数')}
 
     <h3>按年纪拆分</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'grade', '年纪')}
-    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'grade', '年纪周统计')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'grade', '年纪周平均人数')}
 
     <h3>按分行拆分</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'branch', '分行')}
-    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'branch', '分行周统计')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'branch', '分行周平均人数')}
 
     <div class="actions">
       <button id="modal-export-pdf" type="button">📄 导出此科目 PDF</button>
