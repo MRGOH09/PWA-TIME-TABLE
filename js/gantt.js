@@ -481,6 +481,7 @@ function ensureMetricBucket(map, key) {
       effectivePresent: 0,
       effectiveAbsent: 0,
       effectiveNone: 0,
+      pendingHead: 0,
     };
   }
   return map[key];
@@ -503,6 +504,7 @@ function addRecordToMetricBucket(bucket, r) {
     bucket.effectiveNone += none;
   } else if (total > 0) {
     bucket.unmarkedSessions += 1;
+    bucket.pendingHead += total;
   }
 }
 
@@ -510,9 +512,9 @@ function weekOfRecord(r) {
   return isoWeekOf(r.date) || '';
 }
 
-function bucketAverageHead(bucket) {
+function bucketEffectiveHead(bucket) {
   if (!bucket || !bucket.effectiveSessions) return null;
-  return bucket.effectiveHead / bucket.effectiveSessions;
+  return bucket.effectiveHead;
 }
 
 function valueDeltaPair(valueMap, sorter) {
@@ -529,7 +531,7 @@ function valueDeltaPair(valueMap, sorter) {
 
 function formatAvgTrend(delta, prev) {
   if (delta == null || isNaN(delta)) return '<span class="trend-flat">—</span>';
-  const signed = `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}人`;
+  const signed = `${delta >= 0 ? '+' : ''}${fmtNum(Math.round(delta))}人`;
   const pctStr = (prev != null && prev > 0)
     ? ` (${delta >= 0 ? '+' : ''}${(delta / prev * 100).toFixed(1)}%)`
     : '';
@@ -542,9 +544,9 @@ function weekHeadCellHtml(weekData) {
   if (!weekData || weekData.sessions === 0) {
     return `<td class="num cell-empty">—</td>`;
   }
-  const avg = bucketAverageHead(weekData);
-  if (avg == null) {
-    const tooltip = `未点名待确认 ${weekData.unmarkedSessions} 课；N ${weekData.none}`;
+  const totalHead = bucketEffectiveHead(weekData);
+  if (totalHead == null) {
+    const tooltip = `未点名待确认 ${weekData.unmarkedSessions} 课；待确认人数 ${weekData.pendingHead || weekData.none}`;
     return `<td class="num cell-unmarked" title="${escapeHtml(tooltip)}">待确认</td>`;
   }
   const status = statusForAttendance(
@@ -552,11 +554,12 @@ function weekHeadCellHtml(weekData) {
     weekData.effectiveAbsent || 0,
     weekData.effectiveNone || 0
   );
-  const display = `${avg.toFixed(avg >= 10 ? 1 : 1)}人`;
+  const display = `${fmtNum(totalHead)}人`;
   const tooltip = [
-    `有效平均人数 ${avg.toFixed(1)}`,
+    `有效总人数 ${fmtNum(totalHead)}`,
     `有效课 ${weekData.effectiveSessions}`,
     `未点名待确认 ${weekData.unmarkedSessions}`,
+    `待确认人数 ${weekData.pendingHead || 0}`,
     `有效P ${weekData.effectivePresent || 0}`,
     `有效A ${weekData.effectiveAbsent || 0}`,
     `有效N ${weekData.effectiveNone || 0}`,
@@ -570,18 +573,20 @@ function classCountCellHtml(data) {
     return `<td class="num cell-empty">—</td>`;
   }
   const tooltip = [
-    `有效课 ${data.effectiveSessions || 0}`,
-    `未点名待确认 ${data.unmarkedSessions || 0}`,
+    `有效科数 ${fmtNum(data.effectiveHead || 0)}`,
+    `待确认人数 ${fmtNum(data.pendingHead || 0)}`,
+    `有效课次 ${data.effectiveSessions || 0}`,
+    `未点名课次 ${data.unmarkedSessions || 0}`,
     `全部课 ${data.sessions || 0}`,
     `P ${data.present || 0}`,
     `A ${data.absent || 0}`,
     `N ${data.none || 0}`,
   ].join('  ');
   if (!data.effectiveSessions) {
-    return `<td class="num cell-unmarked" title="${escapeHtml(tooltip)}">待${data.unmarkedSessions || 0}</td>`;
+    return `<td class="num cell-unmarked" title="${escapeHtml(tooltip)}">待${fmtNum(data.pendingHead || data.none || 0)}</td>`;
   }
-  const suffix = data.unmarkedSessions ? `+待${data.unmarkedSessions}` : '';
-  return `<td class="num" title="${escapeHtml(tooltip)}">${fmtNum(data.effectiveSessions)}${escapeHtml(suffix)}</td>`;
+  const suffix = data.pendingHead ? `+待${fmtNum(data.pendingHead)}` : '';
+  return `<td class="num" title="${escapeHtml(tooltip)}">${fmtNum(data.effectiveHead || 0)}${escapeHtml(suffix)}</td>`;
 }
 
 function computeTeacherClassContributions(records, teacher, level) {
@@ -1116,7 +1121,7 @@ function computeTeacherStats(records, level) {
         months: {},
         weeks: {},
         monthPMap: new Map(),
-        weekAvgMap: new Map(),
+        weekHeadMap: new Map(),
       });
     }
     const s = map.get(key);
@@ -1156,10 +1161,10 @@ function computeTeacherStats(records, level) {
     const trend = monthDeltaPair(s.monthPMap);
     const overall = monthFirstLastDelta(s.monthPMap);
     for (const wk of weeks) {
-      const avg = bucketAverageHead(s.weeks[wk]);
-      if (avg != null) s.weekAvgMap.set(wk, avg);
+      const avg = bucketEffectiveHead(s.weeks[wk]);
+      if (avg != null) s.weekHeadMap.set(wk, avg);
     }
-    const weekTrend = valueDeltaPair(s.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
+    const weekTrend = valueDeltaPair(s.weekHeadMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       teacher: s.teacher,
       teacherDisplay: s.teacherDisplay,
@@ -1177,7 +1182,7 @@ function computeTeacherStats(records, level) {
       months: s.months,
       weeks: s.weeks,
       monthPMap: s.monthPMap,
-      weekAvgMap: s.weekAvgMap,
+      weekHeadMap: s.weekHeadMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
@@ -1216,7 +1221,7 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
         months: {},
         weeks: {},
         monthPMap: new Map(),
-        weekAvgMap: new Map(),
+        weekHeadMap: new Map(),
       });
     }
     const e = map.get(key);
@@ -1252,10 +1257,10 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
     const trend = monthDeltaPair(e.monthPMap);
     const overall = monthFirstLastDelta(e.monthPMap);
     for (const wk of weeks) {
-      const avg = bucketAverageHead(e.weeks[wk]);
-      if (avg != null) e.weekAvgMap.set(wk, avg);
+      const avg = bucketEffectiveHead(e.weeks[wk]);
+      if (avg != null) e.weekHeadMap.set(wk, avg);
     }
-    const weekTrend = valueDeltaPair(e.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
+    const weekTrend = valueDeltaPair(e.weekHeadMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       key: e.key,
       slots: e.slotKeys.size,
@@ -1268,7 +1273,7 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
       months: e.months,
       weeks: e.weeks,
       monthPMap: e.monthPMap,
-      weekAvgMap: e.weekAvgMap,
+      weekHeadMap: e.weekHeadMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
@@ -1320,11 +1325,11 @@ function renderTeachersView() {
   $('#teachers-table-wrap').innerHTML = `
     <div class="subject-section-title">中学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '中学')}
-    <div class="subject-section-title" style="margin-top:18px;">中学老师周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title" style="margin-top:18px;">中学老师周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
     ${renderTeacherWeekLeaderboard(records, '中学')}
     <div class="subject-section-title primary" style="margin-top:18px;">小学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '小学')}
-    <div class="subject-section-title primary" style="margin-top:18px;">小学老师周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title primary" style="margin-top:18px;">小学老师周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
     ${renderTeacherWeekLeaderboard(records, '小学')}
   `;
   // Heatmap section is no longer used in the teachers view; clear it so a previous render does not linger.
@@ -1372,7 +1377,7 @@ function renderTeacherLeaderboard(records, level) {
     <thead><tr>
       <th>老师</th>
       <th>分行</th>
-      <th class="num">时段</th>
+	      <th class="num">班数</th>
       <th class="num">科目</th>
       ${monthHeaders}
       <th class="num">总出席</th>
@@ -1414,14 +1419,14 @@ function renderTeacherWeekLeaderboard(records, level) {
     <thead><tr>
       <th>老师</th>
       <th>分行</th>
-      <th class="num">时段</th>
+      <th class="num">班数</th>
       <th class="num">科目</th>
       ${weekHeaders}
       <th title="最近两个有效周对比">周变化</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周平均人数单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
+  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不纳入正式总人数。</div>`;
 }
 
 function renderTeacherBreakdownTable(records, teacher, level, dimension, label) {
@@ -1483,7 +1488,7 @@ function renderTeacherBreakdownTable(records, teacher, level, dimension, label) 
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>${escapeHtml(label)}</th>
-      <th class="num">时段</th>
+      <th class="num">班数</th>
       ${monthHeaders}
       <th class="num">总出席</th>
       <th class="num">出勤率</th>
@@ -1519,6 +1524,7 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
       present: 0, absent: 0, none: 0, sessions: 0,
       effectiveSessions: 0, unmarkedSessions: 0, effectiveHead: 0,
       effectivePresent: 0, effectiveAbsent: 0, effectiveNone: 0,
+      pendingHead: 0,
     };
     for (const s of stats) {
       const wd = s.weeks[w];
@@ -1533,13 +1539,14 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
       aggWeekly[w].effectivePresent += wd.effectivePresent || 0;
       aggWeekly[w].effectiveAbsent += wd.effectiveAbsent || 0;
       aggWeekly[w].effectiveNone += wd.effectiveNone || 0;
+      aggWeekly[w].pendingHead += wd.pendingHead || 0;
     }
   }
   const aggWeekCells = weeks.map(w => weekHeadCellHtml(aggWeekly[w])).join('');
   const aggWeekAvgMap = new Map();
   for (const w of weeks) {
-    const avg = bucketAverageHead(aggWeekly[w]);
-    if (avg != null) aggWeekAvgMap.set(w, avg);
+    const head = bucketEffectiveHead(aggWeekly[w]);
+    if (head != null) aggWeekAvgMap.set(w, head);
   }
   const aggTrend = valueDeltaPair(aggWeekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
   const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
@@ -1554,7 +1561,7 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>${escapeHtml(label)}</th>
-      <th class="num">时段</th>
+      <th class="num">班数</th>
       ${weekHeaders}
       <th title="最近两个有效周对比">周变化</th>
     </tr></thead>
@@ -1583,8 +1590,8 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
     for (const b of buckets) {
       const data = bucketMap[b];
       if (!data) continue;
-      effectiveTotal += data.effectiveSessions || 0;
-      pendingTotal += data.unmarkedSessions || 0;
+      effectiveTotal += data.effectiveHead || 0;
+      pendingTotal += data.pendingHead || 0;
     }
     return `<tr>
       <td>${escapeHtml(slot.day)}</td>
@@ -1597,7 +1604,7 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
     </tr>`;
   }).join('');
 
-  const label = bucketBy === 'month' ? '月课数' : '周课数';
+  const label = bucketBy === 'month' ? '月科数' : '周科数';
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>礼拜</th>
@@ -1610,7 +1617,7 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">${label} = 每一班贡献的有效课次数；待N = 有 ${bucketBy === 'month' ? '该月' : '该周'}未点名课，需要确认后才适合纳入结算。</div>`;
+  <div class="matrix-hint">${label} = 班级人数 × 有效课次，即每一班贡献的人次科数；待N = ${bucketBy === 'month' ? '该月' : '该周'}未点名待确认人数，不纳入正式科数。</div>`;
 }
 
 function openTeacherModal(teacher, level) {
@@ -1633,10 +1640,11 @@ function openTeacherModal(teacher, level) {
   const html = `
     <h2>${escapeHtml(stat.teacherDisplay)} ${lvlPill} ${branchPill}</h2>
     <dl>
-      <dt>时段</dt><dd>${stat.slots}</dd>
+	      <dt>班数</dt><dd>${stat.slots}班</dd>
       <dt>科目</dt><dd>${stat.subjects.length ? escapeHtml(stat.subjects.join(', ')) : '-'}</dd>
       <dt>年纪</dt><dd>${stat.grades.length ? escapeHtml(stat.grades.join(', ')) : '-'}</dd>
-      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+	      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+	      <dt>预估满课数</dt><dd>${fmtNum(stat.classSize * 4)}</dd>
       <dt>本期出席</dt><dd><b style="font-size:16px;">${fmtNum(stat.present)}</b></dd>
       <dt>本期缺课</dt><dd>${fmtNum(stat.absent)}</dd>
       <dt>本期未点</dt><dd>${fmtNum(stat.none)}</dd>
@@ -1648,26 +1656,26 @@ function openTeacherModal(teacher, level) {
     <h3>每月出席人次</h3>
     <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
 
-    <h3>每周实际平均人数</h3>
-    <div class="subject-trend-card">${renderWeekHeadChart(stat.weekAvgMap)}</div>
+    <h3>每周实际总人数</h3>
+    <div class="subject-trend-card">${renderWeekHeadChart(stat.weekHeadMap)}</div>
 
-    <h3>每班课数贡献（月）</h3>
+    <h3>每班科数贡献（月）</h3>
     ${renderTeacherClassContributionTable(records, teacher, level, 'month')}
 
-    <h3>每班课数贡献（周）</h3>
+    <h3>每班科数贡献（周）</h3>
     ${renderTeacherClassContributionTable(records, teacher, level, 'week')}
 
     <h3>按科目拆分（合计行在底部）</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'subject', '科目')}
-    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'subject', '科目周平均人数')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'subject', '科目周总人数')}
 
     <h3>按年纪拆分</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'grade', '年纪')}
-    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'grade', '年纪周平均人数')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'grade', '年纪周总人数')}
 
     <h3>按分行拆分</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'branch', '分行')}
-    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'branch', '分行周平均人数')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'branch', '分行周总人数')}
 
     <div class="actions">
       <button id="modal-export-pdf" type="button">📄 导出此老师 PDF</button>
@@ -1712,7 +1720,7 @@ function computeSubjectStats(records, level) {
         months: {},                    // month -> { present, absent, none }
         weeks: {},
         monthPMap: new Map(),
-        weekAvgMap: new Map(),
+        weekHeadMap: new Map(),
       });
     }
     const s = map.get(key);
@@ -1751,10 +1759,10 @@ function computeSubjectStats(records, level) {
     const trend = monthDeltaPair(s.monthPMap);
     const overall = monthFirstLastDelta(s.monthPMap);
     for (const wk of weeks) {
-      const avg = bucketAverageHead(s.weeks[wk]);
-      if (avg != null) s.weekAvgMap.set(wk, avg);
+      const avg = bucketEffectiveHead(s.weeks[wk]);
+      if (avg != null) s.weekHeadMap.set(wk, avg);
     }
-    const weekTrend = valueDeltaPair(s.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
+    const weekTrend = valueDeltaPair(s.weekHeadMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       subject: s.subject,
       slots: s.slotKeys.size,
@@ -1770,7 +1778,7 @@ function computeSubjectStats(records, level) {
       months: s.months,
       weeks: s.weeks,
       monthPMap: s.monthPMap,
-      weekAvgMap: s.weekAvgMap,
+      weekHeadMap: s.weekHeadMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
@@ -1809,7 +1817,7 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
         months: {},
         weeks: {},
         monthPMap: new Map(),
-        weekAvgMap: new Map(),
+        weekHeadMap: new Map(),
       });
     }
     const e = map.get(key);
@@ -1845,10 +1853,10 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
     const trend = monthDeltaPair(e.monthPMap);
     const overall = monthFirstLastDelta(e.monthPMap);
     for (const wk of weeks) {
-      const avg = bucketAverageHead(e.weeks[wk]);
-      if (avg != null) e.weekAvgMap.set(wk, avg);
+      const avg = bucketEffectiveHead(e.weeks[wk]);
+      if (avg != null) e.weekHeadMap.set(wk, avg);
     }
-    const weekTrend = valueDeltaPair(e.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
+    const weekTrend = valueDeltaPair(e.weekHeadMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       key: e.key,
       slots: e.slotKeys.size,
@@ -1861,7 +1869,7 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
       months: e.months,
       weeks: e.weeks,
       monthPMap: e.monthPMap,
-      weekAvgMap: e.weekAvgMap,
+      weekHeadMap: e.weekHeadMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
@@ -1928,13 +1936,13 @@ function renderSubjectsView() {
   $('#subjects-secondary-wrap').innerHTML = `
     <div class="subject-section-title">中学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '中学')}
-    <div class="subject-section-title" style="margin-top:18px;">中学科目周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title" style="margin-top:18px;">中学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
     ${renderSubjectWeekLeaderboard(records, '中学')}
   `;
   $('#subjects-primary-wrap').innerHTML = `
     <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '小学')}
-    <div class="subject-section-title primary" style="margin-top:18px;">小学科目周平均人数 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    <div class="subject-section-title primary" style="margin-top:18px;">小学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
     ${renderSubjectWeekLeaderboard(records, '小学')}
   `;
 
@@ -1977,7 +1985,7 @@ function renderSubjectLeaderboard(records, level) {
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>科目</th>
-      <th class="num">时段</th>
+      <th class="num">班数</th>
       <th class="num">老师</th>
       ${monthHeaders}
       <th class="num">总出席</th>
@@ -2016,14 +2024,14 @@ function renderSubjectWeekLeaderboard(records, level) {
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>科目</th>
-      <th class="num">时段</th>
+      <th class="num">班数</th>
       <th class="num">老师</th>
       ${weekHeaders}
       <th title="最近两个有效周对比">周变化</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周平均人数单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
+  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不纳入正式总人数。</div>`;
 }
 
 function renderSubjectTrendChart(monthPMap) {
@@ -2068,14 +2076,14 @@ function renderSubjectTrendChart(monthPMap) {
   return html;
 }
 
-function renderWeekHeadChart(weekAvgMap) {
-  const entries = Array.from(weekAvgMap.entries())
+function renderWeekHeadChart(weekHeadMap) {
+  const entries = Array.from(weekHeadMap.entries())
     .sort((a, b) => weekOrderOf(a[0]).localeCompare(weekOrderOf(b[0])));
   if (entries.length === 0) {
     return '<p style="color:var(--muted);font-size:12px;">没有有效周数据</p>';
   }
   if (entries.length === 1) {
-    return `<p style="color:var(--muted);font-size:12px;">只有 ${escapeHtml(entries[0][0])} 一个有效周：平均 ${entries[0][1].toFixed(1)} 人</p>`;
+    return `<p style="color:var(--muted);font-size:12px;">只有 ${escapeHtml(entries[0][0])} 一个有效周：总人数 ${fmtNum(entries[0][1])} 人</p>`;
   }
 
   const width = 600;
@@ -2100,7 +2108,7 @@ function renderWeekHeadChart(weekAvgMap) {
   html += `<path d="${path}" fill="none" stroke="#fbbf24" stroke-width="2"/>`;
   points.forEach((p, i) => {
     html += `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#fbbf24"/>`;
-    html += `<text x="${p[0]}" y="${p[1] - 8}" text-anchor="middle" fill="#e2e8f0" font-size="10">${entries[i][1].toFixed(1)}</text>`;
+    html += `<text x="${p[0]}" y="${p[1] - 8}" text-anchor="middle" fill="#e2e8f0" font-size="10">${fmtNum(entries[i][1])}</text>`;
   });
   entries.forEach((e, i) => {
     html += `<text x="${x(i)}" y="${pad.t + h + 14}" text-anchor="middle" fill="#94a3b8" font-size="10">${escapeHtml(weekLabel(e[0]))}</text>`;
@@ -2169,7 +2177,7 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>${escapeHtml(label)}</th>
-      <th class="num">时段</th>
+      <th class="num">班数</th>
       ${monthHeaders}
       <th class="num">总出席</th>
       <th class="num">出勤率</th>
@@ -2205,6 +2213,7 @@ function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, l
       present: 0, absent: 0, none: 0, sessions: 0,
       effectiveSessions: 0, unmarkedSessions: 0, effectiveHead: 0,
       effectivePresent: 0, effectiveAbsent: 0, effectiveNone: 0,
+      pendingHead: 0,
     };
     for (const s of stats) {
       const wd = s.weeks[w];
@@ -2219,13 +2228,14 @@ function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, l
       aggWeekly[w].effectivePresent += wd.effectivePresent || 0;
       aggWeekly[w].effectiveAbsent += wd.effectiveAbsent || 0;
       aggWeekly[w].effectiveNone += wd.effectiveNone || 0;
+      aggWeekly[w].pendingHead += wd.pendingHead || 0;
     }
   }
   const aggWeekCells = weeks.map(w => weekHeadCellHtml(aggWeekly[w])).join('');
   const aggWeekAvgMap = new Map();
   for (const w of weeks) {
-    const avg = bucketAverageHead(aggWeekly[w]);
-    if (avg != null) aggWeekAvgMap.set(w, avg);
+    const head = bucketEffectiveHead(aggWeekly[w]);
+    if (head != null) aggWeekAvgMap.set(w, head);
   }
   const aggTrend = valueDeltaPair(aggWeekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
   const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
@@ -2240,7 +2250,7 @@ function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, l
   return `<div class="month-matrix-wrap"><table class="data month-matrix">
     <thead><tr>
       <th>${escapeHtml(label)}</th>
-      <th class="num">时段</th>
+      <th class="num">班数</th>
       ${weekHeaders}
       <th title="最近两个有效周对比">周变化</th>
     </tr></thead>
@@ -2268,10 +2278,11 @@ function openSubjectModal(subject, level) {
   const html = `
     <h2>科目 ${escapeHtml(stat.subject)} ${lvlPill} ${branchPill}</h2>
     <dl>
-      <dt>课时段</dt><dd>${stat.slots}</dd>
+	      <dt>班数</dt><dd>${stat.slots}班</dd>
       <dt>老师数</dt><dd>${stat.teachers.length}</dd>
       <dt>年纪</dt><dd>${stat.grades.length ? escapeHtml(stat.grades.join(', ')) : '-'}</dd>
-      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+	      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+	      <dt>预估满课数</dt><dd>${fmtNum(stat.classSize * 4)}</dd>
       <dt>本期出席</dt><dd><b style="font-size:16px;">${fmtNum(stat.present)}</b></dd>
       <dt>本期缺课</dt><dd>${fmtNum(stat.absent)}</dd>
       <dt>本期未点</dt><dd>${fmtNum(stat.none)}</dd>
@@ -2283,20 +2294,20 @@ function openSubjectModal(subject, level) {
     <h3>每月出席人次</h3>
     <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
 
-    <h3>每周实际平均人数</h3>
-    <div class="subject-trend-card">${renderWeekHeadChart(stat.weekAvgMap)}</div>
+    <h3>每周实际总人数</h3>
+    <div class="subject-trend-card">${renderWeekHeadChart(stat.weekHeadMap)}</div>
 
     <h3>按老师拆分（合计行在底部）</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'teacherDisplay', '老师')}
-    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'teacherDisplay', '老师周平均人数')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'teacherDisplay', '老师周总人数')}
 
     <h3>按年纪拆分</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'grade', '年纪')}
-    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'grade', '年纪周平均人数')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'grade', '年纪周总人数')}
 
     <h3>按分行拆分</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'branch', '分行')}
-    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'branch', '分行周平均人数')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'branch', '分行周总人数')}
 
     <div class="actions">
       <button id="modal-export-pdf" type="button">📄 导出此科目 PDF</button>
