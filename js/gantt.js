@@ -485,10 +485,8 @@ function compactDateLabel(date, includeMonth) {
 function weekLabel(label) {
   const start = isoWeekStartDate(label);
   if (!start) return label || '';
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
-  const sameMonth = start.getUTCMonth() === end.getUTCMonth();
-  return `${compactDateLabel(start, true)}-${compactDateLabel(end, !sameMonth)}`;
+  const weekNo = String(label).match(/W(\d{2})$/);
+  return `${start.getUTCMonth() + 1}月 W${weekNo ? parseInt(weekNo[1], 10) : ''}`;
 }
 
 function weekFullLabel(label) {
@@ -577,8 +575,8 @@ function weekHeadCellHtml(weekData) {
   }
   const totalHead = bucketEffectiveHead(weekData);
   if (totalHead == null) {
-    const tooltip = `未点名待确认 ${weekData.unmarkedSessions} 课；待确认人数 ${weekData.pendingHead || weekData.none}`;
-    return `<td class="num cell-unmarked" title="${escapeHtml(tooltip)}">待确认</td>`;
+    const tooltip = `未纳入：${weekData.unmarkedSessions} 课未点名`;
+    return `<td class="num cell-empty" title="${escapeHtml(tooltip)}">—</td>`;
   }
   const status = statusForAttendance(
     weekData.effectivePresent || 0,
@@ -589,8 +587,7 @@ function weekHeadCellHtml(weekData) {
   const tooltip = [
     `有效总人数 ${fmtNum(totalHead)}`,
     `有效课 ${weekData.effectiveSessions}`,
-    `未点名待确认 ${weekData.unmarkedSessions}`,
-    `待确认人数 ${weekData.pendingHead || 0}`,
+    `未纳入未点名课 ${weekData.unmarkedSessions}`,
     `有效P ${weekData.effectivePresent || 0}`,
     `有效A ${weekData.effectiveAbsent || 0}`,
     `有效N ${weekData.effectiveNone || 0}`,
@@ -600,24 +597,19 @@ function weekHeadCellHtml(weekData) {
 }
 
 function classCountCellHtml(data) {
-  if (!data || (!data.effectiveSessions && !data.unmarkedSessions)) {
+  if (!data || !data.effectiveSessions) {
     return `<td class="num cell-empty">—</td>`;
   }
   const tooltip = [
     `有效科数 ${fmtNum(data.effectiveHead || 0)}`,
-    `待确认人数 ${fmtNum(data.pendingHead || 0)}`,
     `有效课次 ${data.effectiveSessions || 0}`,
-    `未点名课次 ${data.unmarkedSessions || 0}`,
+    `未纳入未点名课次 ${data.unmarkedSessions || 0}`,
     `全部课 ${data.sessions || 0}`,
     `P ${data.present || 0}`,
     `A ${data.absent || 0}`,
     `N ${data.none || 0}`,
   ].join('  ');
-  if (!data.effectiveSessions) {
-    return `<td class="num cell-unmarked" title="${escapeHtml(tooltip)}">待${fmtNum(data.pendingHead || data.none || 0)}</td>`;
-  }
-  const suffix = data.pendingHead ? `+待${fmtNum(data.pendingHead)}` : '';
-  return `<td class="num" title="${escapeHtml(tooltip)}">${fmtNum(data.effectiveHead || 0)}${escapeHtml(suffix)}</td>`;
+  return `<td class="num" title="${escapeHtml(tooltip)}">${fmtNum(data.effectiveHead || 0)}</td>`;
 }
 
 function computeTeacherClassContributions(records, teacher, level) {
@@ -1356,11 +1348,11 @@ function renderTeachersView() {
   $('#teachers-table-wrap').innerHTML = `
     <div class="subject-section-title">中学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '中学')}
-    <div class="subject-section-title" style="margin-top:18px;">中学老师周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
+    <div class="subject-section-title" style="margin-top:18px;">中学老师周总人数 <span class="small">单元格 = 有效总人数 · 未点名不纳入正式总人数</span></div>
     ${renderTeacherWeekLeaderboard(records, '中学')}
     <div class="subject-section-title primary" style="margin-top:18px;">小学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '小学')}
-    <div class="subject-section-title primary" style="margin-top:18px;">小学老师周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
+    <div class="subject-section-title primary" style="margin-top:18px;">小学老师周总人数 <span class="small">单元格 = 有效总人数 · 未点名不纳入正式总人数</span></div>
     ${renderTeacherWeekLeaderboard(records, '小学')}
   `;
   // Heatmap section is no longer used in the teachers view; clear it so a previous render does not linger.
@@ -1457,7 +1449,7 @@ function renderTeacherWeekLeaderboard(records, level) {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不纳入正式总人数。</div>`;
+  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 的未点名课不纳入正式总人数。</div>`;
 }
 
 function renderTeacherBreakdownTable(records, teacher, level, dimension, label) {
@@ -1617,12 +1609,10 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
     const bucketMap = bucketBy === 'month' ? slot.months : slot.weeks;
     const cells = buckets.map(b => classCountCellHtml(bucketMap[b])).join('');
     let effectiveTotal = 0;
-    let pendingTotal = 0;
     for (const b of buckets) {
       const data = bucketMap[b];
       if (!data) continue;
       effectiveTotal += data.effectiveHead || 0;
-      pendingTotal += data.pendingHead || 0;
     }
     return `<tr>
       <td>${escapeHtml(slot.day)}</td>
@@ -1631,7 +1621,7 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
       <td>${escapeHtml(slot.branch || '-')}</td>
       <td class="num">${fmtNum(slot.classSize)}</td>
       ${cells}
-      <td class="num"><b>${fmtNum(effectiveTotal)}</b>${pendingTotal ? ` <span class="trend-flat">待${fmtNum(pendingTotal)}</span>` : ''}</td>
+      <td class="num"><b>${fmtNum(effectiveTotal)}</b></td>
     </tr>`;
   }).join('');
 
@@ -1648,7 +1638,7 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">${label} = 班级人数 × 有效课次，即每一班贡献的人次科数；待N = ${bucketBy === 'month' ? '该月' : '该周'}未点名待确认人数，不纳入正式科数。</div>`;
+  <div class="matrix-hint">${label} = 班级人数 × 有效课次，即每一班贡献的人次科数；未点名课不纳入正式科数。</div>`;
 }
 
 function openTeacherModal(teacher, level) {
@@ -1967,13 +1957,13 @@ function renderSubjectsView() {
   $('#subjects-secondary-wrap').innerHTML = `
     <div class="subject-section-title">中学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '中学')}
-    <div class="subject-section-title" style="margin-top:18px;">中学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
+    <div class="subject-section-title" style="margin-top:18px;">中学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名不纳入正式总人数</span></div>
     ${renderSubjectWeekLeaderboard(records, '中学')}
   `;
   $('#subjects-primary-wrap').innerHTML = `
     <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '小学')}
-    <div class="subject-section-title primary" style="margin-top:18px;">小学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名待确认不纳入正式总人数</span></div>
+    <div class="subject-section-title primary" style="margin-top:18px;">小学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名不纳入正式总人数</span></div>
     ${renderSubjectWeekLeaderboard(records, '小学')}
   `;
 
@@ -2062,7 +2052,7 @@ function renderSubjectWeekLeaderboard(records, level) {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不纳入正式总人数。</div>`;
+  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 的未点名课不纳入正式总人数。</div>`;
 }
 
 function renderSubjectTrendChart(monthPMap) {
