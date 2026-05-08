@@ -1584,6 +1584,8 @@ Implemented auth routes:
   the code for a `user_access_token`, reads Lark user info, checks the
   optional whitelist, then writes the signed dashboard session cookie.
 * `/api/auth_me` reports the current login state to the frontend.
+* `/api/auth_identity` shows a human-readable login identity page with
+  recommended whitelist environment variable text.
 * `/api/auth_logout` clears the signed dashboard session cookie.
 
 Required Lark / Vercel setup:

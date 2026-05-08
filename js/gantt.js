@@ -757,7 +757,10 @@ async function loadAuthState() {
     if (data.authenticated) {
       const name = (data.user && (data.user.name || data.user.email || data.user.id)) || '已登录';
       node.className = 'auth-chip ok';
-      node.innerHTML = `${escapeHtml(name)} <button type="button" id="auth-logout">登出</button>`;
+      node.innerHTML = `${escapeHtml(name)} <button type="button" id="auth-identity">身份</button><button type="button" id="auth-logout">登出</button>`;
+      $('#auth-identity').addEventListener('click', () => {
+        location.href = '/api/auth_identity';
+      });
       $('#auth-logout').addEventListener('click', async () => {
         await fetch('/api/auth_logout', { method: 'POST' });
         location.reload();
