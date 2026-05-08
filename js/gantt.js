@@ -2490,6 +2490,24 @@ function makePrintHeader(title, subtitle) {
   return node;
 }
 
+function sanitizeFilenamePart(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+function setPrintTitle(parts) {
+  const clean = parts.map(sanitizeFilenamePart).filter(Boolean);
+  const title = clean.length ? clean.join('_') : '周补习时间表_Dashboard';
+  const previous = document.title;
+  document.title = title;
+  return previous;
+}
+
 function bindExportPDF() {
   const btn = $('#export-pdf-btn');
   if (!btn) return;
@@ -2514,8 +2532,14 @@ function bindExportPDF() {
     }
 
     setTimeout(() => {
+      const previousTitle = setPrintTitle([
+        '周补习时间表',
+        viewLabel(state.view),
+        nowDateStr(),
+      ]);
       window.print();
       setTimeout(() => {
+        document.title = previousTitle;
         $$('.view').forEach(node => node.classList.remove('print-active'));
         document.body.classList.remove('print-hide-top-summary');
         if (header && header.parentNode) header.parentNode.removeChild(header);
@@ -2535,16 +2559,24 @@ function exportModalPDF() {
     return;
   }
   const h2 = modalContent.querySelector('h2');
+  const entityTitle = h2 ? h2.textContent.trim() : '';
   const title = `周补习时间表 Dashboard`;
-  const subtitle = (h2 ? `${h2.textContent.trim()}  ·  ` : '')
+  const subtitle = (entityTitle ? `${entityTitle}  ·  ` : '')
     + `导出于 ${nowDateStr()}  ·  数据更新 ${state.updatedAt || '-'}`;
   const header = makePrintHeader(title, subtitle);
   modalContent.insertBefore(header, modalContent.firstChild);
 
   document.body.classList.add('print-modal-only');
   setTimeout(() => {
+    const previousTitle = setPrintTitle([
+      '周补习时间表',
+      viewLabel(state.view),
+      entityTitle,
+      nowDateStr(),
+    ]);
     window.print();
     setTimeout(() => {
+      document.title = previousTitle;
       document.body.classList.remove('print-modal-only');
       if (header && header.parentNode) header.parentNode.removeChild(header);
     }, 200);
