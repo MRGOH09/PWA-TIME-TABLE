@@ -2472,6 +2472,17 @@ function nowDateStr() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function nowTimestampStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}_${hh}-${mi}-${ss}`;
+}
+
 function viewLabel(view) {
   if (view === 'gantt') return '周课表 Gantt';
   if (view === 'teachers') return '老师科数表现';
@@ -2535,7 +2546,7 @@ function bindExportPDF() {
       const previousTitle = setPrintTitle([
         '周补习时间表',
         viewLabel(state.view),
-        nowDateStr(),
+        nowTimestampStr(),
       ]);
       window.print();
       setTimeout(() => {
@@ -2572,7 +2583,7 @@ function exportModalPDF() {
       '周补习时间表',
       viewLabel(state.view),
       entityTitle,
-      nowDateStr(),
+      nowTimestampStr(),
     ]);
     window.print();
     setTimeout(() => {
