@@ -3,10 +3,12 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 
 
 AUTH_COOKIE_NAME = "tuition_auth"
+OAUTH_STATE_COOKIE_NAME = "tuition_oauth_state"
 DEFAULT_SESSION_SECONDS = 60 * 60 * 8
 
 
@@ -87,6 +89,27 @@ def clear_cookie_header():
     return f"{AUTH_COOKIE_NAME}=; Max-Age=0; Path=/; {secure}HttpOnly; SameSite=Lax"
 
 
+def make_oauth_state():
+    return secrets.token_urlsafe(24)
+
+
+def state_cookie_header(value, max_age=600):
+    secure = "Secure; " if os.environ.get("VERCEL") else ""
+    return (
+        f"{OAUTH_STATE_COOKIE_NAME}={value}; Max-Age={max_age}; Path=/api; "
+        f"{secure}HttpOnly; SameSite=Lax"
+    )
+
+
+def clear_state_cookie_header():
+    secure = "Secure; " if os.environ.get("VERCEL") else ""
+    return f"{OAUTH_STATE_COOKIE_NAME}=; Max-Age=0; Path=/api; {secure}HttpOnly; SameSite=Lax"
+
+
+def current_oauth_state(handler):
+    return parse_cookie_header(handler.headers.get("Cookie")).get(OAUTH_STATE_COOKIE_NAME)
+
+
 def send_auth_json(handler, status, payload, cookie=None):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -97,3 +120,13 @@ def send_auth_json(handler, status, payload, cookie=None):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def send_redirect(handler, location, cookies=None):
+    handler.send_response(302)
+    handler.send_header("Location", location)
+    handler.send_header("Cache-Control", "no-store")
+    for cookie in cookies or []:
+        if cookie:
+            handler.send_header("Set-Cookie", cookie)
+    handler.end_headers()

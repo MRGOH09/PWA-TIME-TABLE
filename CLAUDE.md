@@ -1571,6 +1571,43 @@ V1 is considered ready for internal staff review when:
 * a known busy teacher's modal matches manual Lark Base spot checks, and
 * mobile layout is readable enough for basic review.
 
+## Auth Update — 2026-05-08
+
+Lark OAuth is being built on branch `codex/lark-oauth` for learning and
+review before merging to `main`.
+
+Implemented auth routes:
+
+* `/api/auth_login` redirects the browser to Lark login and stores a short
+  OAuth state cookie.
+* `/api/auth_callback` receives Lark's `code`, validates `state`, exchanges
+  the code for a `user_access_token`, reads Lark user info, checks the
+  optional whitelist, then writes the signed dashboard session cookie.
+* `/api/auth_me` reports the current login state to the frontend.
+* `/api/auth_logout` clears the signed dashboard session cookie.
+
+Required Lark / Vercel setup:
+
+* Lark Redirect URL:
+  `https://pwa-time-table.vercel.app/api/auth_callback`
+* Vercel environment variables before enforcing login:
+  * `AUTH_REQUIRED=true`
+  * `AUTH_COOKIE_SECRET=<long random secret>`
+  * `AUTH_REDIRECT_URL=https://pwa-time-table.vercel.app/api/auth_callback`
+  * `ALLOWED_LARK_OPEN_IDS=<comma-separated allowed open_id/union_id/user_id>`
+    or `ALLOWED_EMAILS=<comma-separated allowed emails>`
+* Optional env vars:
+  * `AUTH_SUCCESS_URL=https://pwa-time-table.vercel.app/`
+  * `LARK_OAUTH_SCOPE=<only if Lark asks for explicit login scopes>`
+  * `LARK_OAUTH_AUTHORIZE_URL=<only if Lark changes the authorize URL>`
+
+Testing rule:
+
+* First deploy this branch with `AUTH_REQUIRED=false` or no whitelist to
+  confirm Lark returns the expected user identity.
+* After confirming the user's `open_id` / email through `/api/auth_me`, add
+  the whitelist and only then set `AUTH_REQUIRED=true`.
+
 ## Pending
 
 * Vercel deployment — confirm env vars are configured and the app
