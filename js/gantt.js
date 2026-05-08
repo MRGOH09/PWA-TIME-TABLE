@@ -463,9 +463,40 @@ function weekOrderOf(label) {
   return `${m[1]}${m[2]}`;
 }
 
+function isoWeekStartDate(label) {
+  const m = String(label || '').match(/^(\d{4})-W(\d{2})$/);
+  if (!m) return null;
+  const year = parseInt(m[1], 10);
+  const week = parseInt(m[2], 10);
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const monday = new Date(jan4);
+  monday.setUTCDate(jan4.getUTCDate() - jan4Day + 1 + (week - 1) * 7);
+  return monday;
+}
+
+function compactDateLabel(date, includeMonth) {
+  if (!date) return '';
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  return includeMonth ? `${month}/${day}` : String(day);
+}
+
 function weekLabel(label) {
-  const m = String(label || '').match(/W(\d{2})$/);
-  return m ? `W${m[1]}` : (label || '');
+  const start = isoWeekStartDate(label);
+  if (!start) return label || '';
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  const sameMonth = start.getUTCMonth() === end.getUTCMonth();
+  return `${compactDateLabel(start, true)}-${compactDateLabel(end, !sameMonth)}`;
+}
+
+function weekFullLabel(label) {
+  const start = isoWeekStartDate(label);
+  if (!start) return label || '';
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return `${label} · ${compactDateLabel(start, true)}-${compactDateLabel(end, true)}`;
 }
 
 function ensureMetricBucket(map, key) {
@@ -1399,7 +1430,7 @@ function renderTeacherWeekLeaderboard(records, level) {
   }
 
   const weekHeaders = weeks
-    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .map(w => `<th class="num" title="${escapeHtml(weekFullLabel(w))}">${escapeHtml(weekLabel(w))}</th>`)
     .join('');
 
   const rows = stats.map(s => {
@@ -1505,7 +1536,7 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
   if (!weeks.length) return '<p style="color:var(--muted);font-size:12px;">没有周数据</p>';
 
   const weekHeaders = weeks
-    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .map(w => `<th class="num" title="${escapeHtml(weekFullLabel(w))}">${escapeHtml(weekLabel(w))}</th>`)
     .join('');
 
   const rows = stats.map(s => {
@@ -1578,7 +1609,7 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
   const headers = buckets
     .map(b => {
       const label = bucketBy === 'month' ? (String(b).split('.')[1] || b) : weekLabel(b);
-      return `<th class="num" title="${escapeHtml(b)}">${escapeHtml(label)}</th>`;
+      return `<th class="num" title="${escapeHtml(bucketBy === 'month' ? b : weekFullLabel(b))}">${escapeHtml(label)}</th>`;
     })
     .join('');
 
@@ -2007,7 +2038,7 @@ function renderSubjectWeekLeaderboard(records, level) {
   }
 
   const weekHeaders = weeks
-    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .map(w => `<th class="num" title="${escapeHtml(weekFullLabel(w))}">${escapeHtml(weekLabel(w))}</th>`)
     .join('');
 
   const rows = stats.map(s => {
@@ -2194,7 +2225,7 @@ function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, l
   if (!weeks.length) return '<p style="color:var(--muted);font-size:12px;">没有周数据</p>';
 
   const weekHeaders = weeks
-    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .map(w => `<th class="num" title="${escapeHtml(weekFullLabel(w))}">${escapeHtml(weekLabel(w))}</th>`)
     .join('');
 
   const rows = stats.map(s => {
