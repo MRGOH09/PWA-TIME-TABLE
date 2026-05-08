@@ -721,6 +721,11 @@ async function loadSchedule(opts) {
     // No ?t= cache-bust — we want CDN edge cache to work.
     const resp = await fetch('/api/schedule');
     const data = await resp.json();
+    if (resp.status === 401) {
+      $('#meta').textContent = '请先使用 Lark 登录后再查看数据。';
+      $('#meta').style.color = 'var(--status-low)';
+      return;
+    }
     if (!data || !data.success) {
       throw new Error(data && data.error ? data.error : '未知错误');
     }
@@ -734,6 +739,39 @@ async function loadSchedule(opts) {
     }
     $('#meta').textContent = '无法读取 Lark Base 数据：' + (err.message || err);
     $('#meta').style.color = 'var(--status-low)';
+  }
+}
+
+async function loadAuthState() {
+  const node = $('#auth-status');
+  if (!node) return;
+  try {
+    const resp = await fetch('/api/auth_me');
+    const data = await resp.json();
+    if (!data || !data.success) throw new Error('auth check failed');
+    if (!data.authRequired) {
+      node.className = 'auth-chip';
+      node.textContent = '登录保护未启用';
+      return;
+    }
+    if (data.authenticated) {
+      const name = (data.user && (data.user.name || data.user.email || data.user.id)) || '已登录';
+      node.className = 'auth-chip ok';
+      node.innerHTML = `${escapeHtml(name)} <button type="button" id="auth-logout">登出</button>`;
+      $('#auth-logout').addEventListener('click', async () => {
+        await fetch('/api/auth_logout', { method: 'POST' });
+        location.reload();
+      });
+      return;
+    }
+    node.className = 'auth-chip warn';
+    node.innerHTML = '未登录 <button type="button" id="auth-login">Lark 登录</button>';
+    $('#auth-login').addEventListener('click', () => {
+      location.href = '/api/auth_login';
+    });
+  } catch (err) {
+    node.className = 'auth-chip warn';
+    node.textContent = '登录状态未知';
   }
 }
 
@@ -2769,6 +2807,7 @@ function init() {
   bindFilters();
   bindModalDismiss();
   bindExportPDF();
+  loadAuthState();
   loadSchedule({ useCache: true });
   startAutoRefresh();
 }

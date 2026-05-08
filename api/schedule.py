@@ -11,11 +11,15 @@ from _lark import (
     normalize_record,
     send_json,
 )
+from _auth import auth_required, current_user
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
+            if auth_required() and not current_user(self):
+                send_json(self, 401, {"success": False, "error": "Unauthorized"})
+                return
             env = get_env()
             token = get_tenant_access_token(env["LARK_APP_ID"], env["LARK_APP_SECRET"])
             raw = fetch_all_records(token, env)
