@@ -456,6 +456,115 @@ function monthFirstLastDelta(monthPMap) {
   return { firstP, lastP, delta: lastP - firstP, firstMonth, lastMonth };
 }
 
+function weekOrderOf(label) {
+  if (!label) return '';
+  const m = String(label).match(/^(\d{4})-W(\d{2})$/);
+  if (!m) return String(label);
+  return `${m[1]}${m[2]}`;
+}
+
+function weekLabel(label) {
+  const m = String(label || '').match(/W(\d{2})$/);
+  return m ? `W${m[1]}` : (label || '');
+}
+
+function ensureMetricBucket(map, key) {
+  if (!map[key]) {
+    map[key] = {
+      present: 0,
+      absent: 0,
+      none: 0,
+      sessions: 0,
+      effectiveSessions: 0,
+      unmarkedSessions: 0,
+      effectiveHead: 0,
+      effectivePresent: 0,
+      effectiveAbsent: 0,
+      effectiveNone: 0,
+    };
+  }
+  return map[key];
+}
+
+function addRecordToMetricBucket(bucket, r) {
+  const present = r.present || 0;
+  const absent = r.absent || 0;
+  const none = r.none || 0;
+  const total = present + absent + none;
+  bucket.present += present;
+  bucket.absent += absent;
+  bucket.none += none;
+  bucket.sessions += 1;
+  if ((present + absent) > 0) {
+    bucket.effectiveSessions += 1;
+    bucket.effectiveHead += total;
+    bucket.effectivePresent += present;
+    bucket.effectiveAbsent += absent;
+    bucket.effectiveNone += none;
+  } else if (total > 0) {
+    bucket.unmarkedSessions += 1;
+  }
+}
+
+function weekOfRecord(r) {
+  return isoWeekOf(r.date) || '';
+}
+
+function bucketAverageHead(bucket) {
+  if (!bucket || !bucket.effectiveSessions) return null;
+  return bucket.effectiveHead / bucket.effectiveSessions;
+}
+
+function valueDeltaPair(valueMap, sorter) {
+  const sorted = Array.from(valueMap.keys()).sort(sorter);
+  if (sorted.length < 2) {
+    return { prev: null, last: sorted.length === 1 ? valueMap.get(sorted[0]) : null, delta: null };
+  }
+  const prevKey = sorted[sorted.length - 2];
+  const lastKey = sorted[sorted.length - 1];
+  const prev = valueMap.get(prevKey);
+  const last = valueMap.get(lastKey);
+  return { prev, last, delta: last - prev, prevKey, lastKey };
+}
+
+function formatAvgTrend(delta, prev) {
+  if (delta == null || isNaN(delta)) return '<span class="trend-flat">—</span>';
+  const signed = `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}人`;
+  const pctStr = (prev != null && prev > 0)
+    ? ` (${delta >= 0 ? '+' : ''}${(delta / prev * 100).toFixed(1)}%)`
+    : '';
+  if (Math.abs(delta) < 0.05) return `<span class="trend-flat">→ 0${pctStr}</span>`;
+  if (delta > 0) return `<span class="trend-up">↑ ${signed}${pctStr}</span>`;
+  return `<span class="trend-down">↓ ${signed}${pctStr}</span>`;
+}
+
+function weekHeadCellHtml(weekData) {
+  if (!weekData || weekData.sessions === 0) {
+    return `<td class="num cell-empty">—</td>`;
+  }
+  const avg = bucketAverageHead(weekData);
+  if (avg == null) {
+    const tooltip = `未点名待确认 ${weekData.unmarkedSessions} 课；N ${weekData.none}`;
+    return `<td class="num cell-unmarked" title="${escapeHtml(tooltip)}">待确认</td>`;
+  }
+  const status = statusForAttendance(
+    weekData.effectivePresent || 0,
+    weekData.effectiveAbsent || 0,
+    weekData.effectiveNone || 0
+  );
+  const display = `${avg.toFixed(avg >= 10 ? 1 : 1)}人`;
+  const tooltip = [
+    `有效平均人数 ${avg.toFixed(1)}`,
+    `有效课 ${weekData.effectiveSessions}`,
+    `未点名待确认 ${weekData.unmarkedSessions}`,
+    `有效P ${weekData.effectivePresent || 0}`,
+    `有效A ${weekData.effectiveAbsent || 0}`,
+    `有效N ${weekData.effectiveNone || 0}`,
+    `全部P/A/N ${weekData.present}/${weekData.absent}/${weekData.none}`,
+  ].join('  ');
+  return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
+}
+
 // ===================================================================
 // Data loading + localStorage cache
 // ===================================================================
@@ -916,10 +1025,13 @@ function computeTeacherStats(records, level) {
   const filtered = level ? records.filter(r => r.level === level) : records;
   const map = new Map();
   const monthSet = new Set();
+  const weekSet = new Set();
 
   for (const r of filtered) {
     if (!r.teacher) continue;
     if (r.month) monthSet.add(r.month);
+    const wk = weekOfRecord(r);
+    if (wk) weekSet.add(wk);
     const key = r.teacher;
     if (!map.has(key)) {
       map.set(key, {
@@ -933,7 +1045,9 @@ function computeTeacherStats(records, level) {
         slotClassSize: new Map(),
         present: 0, absent: 0, none: 0,
         months: {},
+        weeks: {},
         monthPMap: new Map(),
+        weekAvgMap: new Map(),
       });
     }
     const s = map.get(key);
@@ -957,9 +1071,11 @@ function computeTeacherStats(records, level) {
       s.months[r.month].none += r.none || 0;
       s.monthPMap.set(r.month, (s.monthPMap.get(r.month) || 0) + (r.present || 0));
     }
+    if (wk) addRecordToMetricBucket(ensureMetricBucket(s.weeks, wk), r);
   }
 
   const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const weeks = Array.from(weekSet).sort((a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
 
   const stats = [];
   for (const s of map.values()) {
@@ -970,6 +1086,11 @@ function computeTeacherStats(records, level) {
     s.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(s.monthPMap);
     const overall = monthFirstLastDelta(s.monthPMap);
+    for (const wk of weeks) {
+      const avg = bucketAverageHead(s.weeks[wk]);
+      if (avg != null) s.weekAvgMap.set(wk, avg);
+    }
+    const weekTrend = valueDeltaPair(s.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       teacher: s.teacher,
       teacherDisplay: s.teacherDisplay,
@@ -985,18 +1106,23 @@ function computeTeacherStats(records, level) {
       classSize: classSizeSum,
       rate,
       months: s.months,
+      weeks: s.weeks,
       monthPMap: s.monthPMap,
+      weekAvgMap: s.weekAvgMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
       overallDelta: overall.delta,
       overallFirstP: overall.firstP,
       overallLastP: overall.lastP,
+      weekTrendDelta: weekTrend.delta,
+      weekTrendPrev: weekTrend.prev,
+      weekTrendLast: weekTrend.last,
     });
   }
 
   stats.sort((a, b) => b.present - a.present);
-  return { stats, months };
+  return { stats, months, weeks };
 }
 
 function computeTeacherBreakdown(records, teacher, level, dimension) {
@@ -1005,10 +1131,13 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
   );
   const map = new Map();
   const monthSet = new Set();
+  const weekSet = new Set();
 
   for (const r of filtered) {
     const key = r[dimension];
     if (r.month) monthSet.add(r.month);
+    const wk = weekOfRecord(r);
+    if (wk) weekSet.add(wk);
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -1016,7 +1145,9 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
         present: 0, absent: 0, none: 0,
         slotClassSize: new Map(),
         months: {},
+        weeks: {},
         monthPMap: new Map(),
+        weekAvgMap: new Map(),
       });
     }
     const e = map.get(key);
@@ -1036,9 +1167,11 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
       e.months[r.month].none += r.none || 0;
       e.monthPMap.set(r.month, (e.monthPMap.get(r.month) || 0) + (r.present || 0));
     }
+    if (wk) addRecordToMetricBucket(ensureMetricBucket(e.weeks, wk), r);
   }
 
   const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const weeks = Array.from(weekSet).sort((a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
 
   const stats = [];
   for (const e of map.values()) {
@@ -1049,6 +1182,11 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
     e.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(e.monthPMap);
     const overall = monthFirstLastDelta(e.monthPMap);
+    for (const wk of weeks) {
+      const avg = bucketAverageHead(e.weeks[wk]);
+      if (avg != null) e.weekAvgMap.set(wk, avg);
+    }
+    const weekTrend = valueDeltaPair(e.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       key: e.key,
       slots: e.slotKeys.size,
@@ -1059,13 +1197,18 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
       classSize: classSizeSum,
       rate,
       months: e.months,
+      weeks: e.weeks,
       monthPMap: e.monthPMap,
+      weekAvgMap: e.weekAvgMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
       overallDelta: overall.delta,
       overallFirstP: overall.firstP,
       overallLastP: overall.lastP,
+      weekTrendDelta: weekTrend.delta,
+      weekTrendPrev: weekTrend.prev,
+      weekTrendLast: weekTrend.last,
     });
   }
 
@@ -1074,7 +1217,7 @@ function computeTeacherBreakdown(records, teacher, level, dimension) {
   } else {
     stats.sort((a, b) => b.present - a.present);
   }
-  return { stats, months };
+  return { stats, months, weeks };
 }
 
 function renderTeachersView() {
@@ -1108,8 +1251,12 @@ function renderTeachersView() {
   $('#teachers-table-wrap').innerHTML = `
     <div class="subject-section-title">中学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '中学')}
+    <div class="subject-section-title" style="margin-top:18px;">中学老师周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    ${renderTeacherWeekLeaderboard(records, '中学')}
     <div class="subject-section-title primary" style="margin-top:18px;">小学老师 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderTeacherLeaderboard(records, '小学')}
+    <div class="subject-section-title primary" style="margin-top:18px;">小学老师周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    ${renderTeacherWeekLeaderboard(records, '小学')}
   `;
   // Heatmap section is no longer used in the teachers view; clear it so a previous render does not linger.
   $('#teachers-heatmap-wrap').innerHTML = '';
@@ -1165,7 +1312,47 @@ function renderTeacherLeaderboard(records, level) {
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}</tbody>
-  </table></div>`;
+	  </table></div>`;
+}
+
+function renderTeacherWeekLeaderboard(records, level) {
+  const { stats, weeks } = computeTeacherStats(records, level);
+  if (!stats.length) {
+    return `<div class="empty-msg">没有 ${escapeHtml(level)} 老师数据</div>`;
+  }
+  if (!weeks.length) {
+    return `<div class="empty-msg">没有周数据</div>`;
+  }
+
+  const weekHeaders = weeks
+    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .join('');
+
+  const rows = stats.map(s => {
+    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    const branchLabel = s.branches.length ? s.branches.join(', ') : '-';
+    return `<tr class="clickable" data-teacher="${escapeHtml(s.teacher)}" data-level="${escapeHtml(level)}">
+      <td class="col-key">${escapeHtml(s.teacherDisplay)}</td>
+      <td>${escapeHtml(branchLabel)}</td>
+      <td class="num">${s.slots}</td>
+      <td class="num">${s.subjects.length}</td>
+      ${weekCells}
+      <td class="col-trend">${formatAvgTrend(s.weekTrendDelta, s.weekTrendPrev)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
+    <thead><tr>
+      <th>老师</th>
+      <th>分行</th>
+      <th class="num">时段</th>
+      <th class="num">科目</th>
+      ${weekHeaders}
+      <th title="最近两个有效周对比">周变化</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>
+  <div class="matrix-hint">周统计单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
 }
 
 function renderTeacherBreakdownTable(records, teacher, level, dimension, label) {
@@ -1235,6 +1422,74 @@ function renderTeacherBreakdownTable(records, teacher, level, dimension, label) 
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
+	  </table></div>`;
+}
+
+function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, label) {
+  const { stats, weeks } = computeTeacherBreakdown(records, teacher, level, dimension);
+  if (!stats.length) return '<p style="color:var(--muted);font-size:12px;">没有数据</p>';
+  if (!weeks.length) return '<p style="color:var(--muted);font-size:12px;">没有周数据</p>';
+
+  const weekHeaders = weeks
+    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .join('');
+
+  const rows = stats.map(s => {
+    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    return `<tr>
+      <td class="col-key">${escapeHtml(s.key)}</td>
+      <td class="num">${s.slots}</td>
+      ${weekCells}
+      <td class="col-trend">${formatAvgTrend(s.weekTrendDelta, s.weekTrendPrev)}</td>
+    </tr>`;
+  }).join('');
+
+  const aggWeekly = {};
+  for (const w of weeks) {
+    aggWeekly[w] = {
+      present: 0, absent: 0, none: 0, sessions: 0,
+      effectiveSessions: 0, unmarkedSessions: 0, effectiveHead: 0,
+      effectivePresent: 0, effectiveAbsent: 0, effectiveNone: 0,
+    };
+    for (const s of stats) {
+      const wd = s.weeks[w];
+      if (!wd) continue;
+      aggWeekly[w].present += wd.present;
+      aggWeekly[w].absent += wd.absent;
+      aggWeekly[w].none += wd.none;
+      aggWeekly[w].sessions += wd.sessions;
+      aggWeekly[w].effectiveSessions += wd.effectiveSessions;
+      aggWeekly[w].unmarkedSessions += wd.unmarkedSessions;
+      aggWeekly[w].effectiveHead += wd.effectiveHead;
+      aggWeekly[w].effectivePresent += wd.effectivePresent || 0;
+      aggWeekly[w].effectiveAbsent += wd.effectiveAbsent || 0;
+      aggWeekly[w].effectiveNone += wd.effectiveNone || 0;
+    }
+  }
+  const aggWeekCells = weeks.map(w => weekHeadCellHtml(aggWeekly[w])).join('');
+  const aggWeekAvgMap = new Map();
+  for (const w of weeks) {
+    const avg = bucketAverageHead(aggWeekly[w]);
+    if (avg != null) aggWeekAvgMap.set(w, avg);
+  }
+  const aggTrend = valueDeltaPair(aggWeekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
+  const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
+
+  const aggRow = `<tr class="agg-row">
+    <td>合计</td>
+    <td class="num">${aggSlots}</td>
+    ${aggWeekCells}
+    <td class="col-trend">${formatAvgTrend(aggTrend.delta, aggTrend.prev)}</td>
+  </tr>`;
+
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
+    <thead><tr>
+      <th>${escapeHtml(label)}</th>
+      <th class="num">时段</th>
+      ${weekHeaders}
+      <th title="最近两个有效周对比">周变化</th>
+    </tr></thead>
+    <tbody>${rows}${aggRow}</tbody>
   </table></div>`;
 }
 
@@ -1273,14 +1528,20 @@ function openTeacherModal(teacher, level) {
     <h3>每月出席人次</h3>
     <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
 
+    <h3>每周实际平均人数</h3>
+    <div class="subject-trend-card">${renderWeekHeadChart(stat.weekAvgMap)}</div>
+
     <h3>按科目拆分（合计行在底部）</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'subject', '科目')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'subject', '科目周统计')}
 
     <h3>按年纪拆分</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'grade', '年纪')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'grade', '年纪周统计')}
 
     <h3>按分行拆分</h3>
     ${renderTeacherBreakdownTable(records, teacher, level, 'branch', '分行')}
+    ${renderTeacherWeeklyBreakdownTable(records, teacher, level, 'branch', '分行周统计')}
 
     <div class="actions">
       <button id="modal-export-pdf" type="button">📄 导出此老师 PDF</button>
@@ -1305,10 +1566,13 @@ function computeSubjectStats(records, level) {
   const filtered = level ? records.filter(r => r.level === level) : records;
   const map = new Map();
   const monthSet = new Set();
+  const weekSet = new Set();
 
   for (const r of filtered) {
     if (!r.subject) continue;
     if (r.month) monthSet.add(r.month);
+    const wk = weekOfRecord(r);
+    if (wk) weekSet.add(wk);
     const key = r.subject;
     if (!map.has(key)) {
       map.set(key, {
@@ -1320,7 +1584,9 @@ function computeSubjectStats(records, level) {
         present: 0, absent: 0, none: 0,
         slotClassSize: new Map(),
         months: {},                    // month -> { present, absent, none }
+        weeks: {},
         monthPMap: new Map(),
+        weekAvgMap: new Map(),
       });
     }
     const s = map.get(key);
@@ -1343,9 +1609,11 @@ function computeSubjectStats(records, level) {
       s.months[r.month].none += r.none || 0;
       s.monthPMap.set(r.month, (s.monthPMap.get(r.month) || 0) + (r.present || 0));
     }
+    if (wk) addRecordToMetricBucket(ensureMetricBucket(s.weeks, wk), r);
   }
 
   const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const weeks = Array.from(weekSet).sort((a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
 
   const stats = [];
   for (const s of map.values()) {
@@ -1356,6 +1624,11 @@ function computeSubjectStats(records, level) {
     s.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(s.monthPMap);
     const overall = monthFirstLastDelta(s.monthPMap);
+    for (const wk of weeks) {
+      const avg = bucketAverageHead(s.weeks[wk]);
+      if (avg != null) s.weekAvgMap.set(wk, avg);
+    }
+    const weekTrend = valueDeltaPair(s.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       subject: s.subject,
       slots: s.slotKeys.size,
@@ -1369,18 +1642,23 @@ function computeSubjectStats(records, level) {
       classSize: classSizeSum,
       rate,
       months: s.months,
+      weeks: s.weeks,
       monthPMap: s.monthPMap,
+      weekAvgMap: s.weekAvgMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
       overallDelta: overall.delta,
       overallFirstP: overall.firstP,
       overallLastP: overall.lastP,
+      weekTrendDelta: weekTrend.delta,
+      weekTrendPrev: weekTrend.prev,
+      weekTrendLast: weekTrend.last,
     });
   }
 
   stats.sort((a, b) => b.present - a.present);
-  return { stats, months };
+  return { stats, months, weeks };
 }
 
 function computeSubjectBreakdown(records, subject, level, dimension) {
@@ -1389,10 +1667,13 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
   );
   const map = new Map();
   const monthSet = new Set();
+  const weekSet = new Set();
 
   for (const r of filtered) {
     const key = r[dimension];
     if (r.month) monthSet.add(r.month);
+    const wk = weekOfRecord(r);
+    if (wk) weekSet.add(wk);
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -1400,7 +1681,9 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
         present: 0, absent: 0, none: 0,
         slotClassSize: new Map(),
         months: {},
+        weeks: {},
         monthPMap: new Map(),
+        weekAvgMap: new Map(),
       });
     }
     const e = map.get(key);
@@ -1420,9 +1703,11 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
       e.months[r.month].none += r.none || 0;
       e.monthPMap.set(r.month, (e.monthPMap.get(r.month) || 0) + (r.present || 0));
     }
+    if (wk) addRecordToMetricBucket(ensureMetricBucket(e.weeks, wk), r);
   }
 
   const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const weeks = Array.from(weekSet).sort((a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
 
   const stats = [];
   for (const e of map.values()) {
@@ -1433,6 +1718,11 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
     e.slotClassSize.forEach(v => { classSizeSum += v; });
     const trend = monthDeltaPair(e.monthPMap);
     const overall = monthFirstLastDelta(e.monthPMap);
+    for (const wk of weeks) {
+      const avg = bucketAverageHead(e.weeks[wk]);
+      if (avg != null) e.weekAvgMap.set(wk, avg);
+    }
+    const weekTrend = valueDeltaPair(e.weekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
     stats.push({
       key: e.key,
       slots: e.slotKeys.size,
@@ -1443,13 +1733,18 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
       classSize: classSizeSum,
       rate,
       months: e.months,
+      weeks: e.weeks,
       monthPMap: e.monthPMap,
+      weekAvgMap: e.weekAvgMap,
       trendDelta: trend.delta,
       lastP: trend.lastP,
       prevP: trend.prevP,
       overallDelta: overall.delta,
       overallFirstP: overall.firstP,
       overallLastP: overall.lastP,
+      weekTrendDelta: weekTrend.delta,
+      weekTrendPrev: weekTrend.prev,
+      weekTrendLast: weekTrend.last,
     });
   }
 
@@ -1458,7 +1753,7 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
   } else {
     stats.sort((a, b) => b.present - a.present);
   }
-  return { stats, months };
+  return { stats, months, weeks };
 }
 
 function monthCellHtml(monthData) {
@@ -1507,10 +1802,14 @@ function renderSubjectsView() {
   $('#subjects-secondary-wrap').innerHTML = `
     <div class="subject-section-title">中学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '中学')}
+    <div class="subject-section-title" style="margin-top:18px;">中学科目周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    ${renderSubjectWeekLeaderboard(records, '中学')}
   `;
   $('#subjects-primary-wrap').innerHTML = `
     <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
     ${renderSubjectLeaderboard(records, '小学')}
+    <div class="subject-section-title primary" style="margin-top:18px;">小学科目周统计 <span class="small">单元格 = 有效课平均人数 · 未点名待确认不参与平均</span></div>
+    ${renderSubjectWeekLeaderboard(records, '小学')}
   `;
 
   $$('#view-subjects table tbody tr.clickable').forEach(tr => {
@@ -1561,7 +1860,44 @@ function renderSubjectLeaderboard(records, level) {
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}</tbody>
-  </table></div>`;
+	  </table></div>`;
+}
+
+function renderSubjectWeekLeaderboard(records, level) {
+  const { stats, weeks } = computeSubjectStats(records, level);
+  if (!stats.length) {
+    return `<div class="empty-msg">没有 ${escapeHtml(level)} 科目数据</div>`;
+  }
+  if (!weeks.length) {
+    return `<div class="empty-msg">没有周数据</div>`;
+  }
+
+  const weekHeaders = weeks
+    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .join('');
+
+  const rows = stats.map(s => {
+    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    return `<tr class="clickable" data-subject="${escapeHtml(s.subject)}" data-level="${escapeHtml(level)}">
+      <td class="col-key">${escapeHtml(s.subject)}</td>
+      <td class="num">${s.slots}</td>
+      <td class="num">${s.teachers.length}</td>
+      ${weekCells}
+      <td class="col-trend">${formatAvgTrend(s.weekTrendDelta, s.weekTrendPrev)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
+    <thead><tr>
+      <th>科目</th>
+      <th class="num">时段</th>
+      <th class="num">老师</th>
+      ${weekHeaders}
+      <th title="最近两个有效周对比">周变化</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>
+  <div class="matrix-hint">周统计单元格 = 有效课平均人数。只统计 P+A&gt;0 的课；P+A=0 且 N&gt;0 显示“待确认”，不参与平均。</div>`;
 }
 
 function renderSubjectTrendChart(monthPMap) {
@@ -1601,6 +1937,47 @@ function renderSubjectTrendChart(monthPMap) {
   entries.forEach((e, i) => {
     const lbl = (e[0].split('.')[1] || e[0]).slice(0, 4);
     html += `<text x="${x(i)}" y="${pad.t + h + 14}" text-anchor="middle" fill="#94a3b8" font-size="10">${escapeHtml(lbl)}</text>`;
+  });
+  html += '</svg>';
+  return html;
+}
+
+function renderWeekHeadChart(weekAvgMap) {
+  const entries = Array.from(weekAvgMap.entries())
+    .sort((a, b) => weekOrderOf(a[0]).localeCompare(weekOrderOf(b[0])));
+  if (entries.length === 0) {
+    return '<p style="color:var(--muted);font-size:12px;">没有有效周数据</p>';
+  }
+  if (entries.length === 1) {
+    return `<p style="color:var(--muted);font-size:12px;">只有 ${escapeHtml(entries[0][0])} 一个有效周：平均 ${entries[0][1].toFixed(1)} 人</p>`;
+  }
+
+  const width = 600;
+  const height = 160;
+  const pad = { l: 44, r: 16, t: 16, b: 24 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+
+  const maxP = Math.max(...entries.map(e => e[1]), 1);
+  const xStep = w / (entries.length - 1);
+  const x = i => pad.l + i * xStep;
+  const y = v => pad.t + h - (v / maxP * h);
+
+  let html = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`;
+  for (let p = 0; p <= 1; p += 0.25) {
+    const yy = pad.t + h - p * h;
+    html += `<line x1="${pad.l}" y1="${yy}" x2="${pad.l + w}" y2="${yy}" stroke="#334155" stroke-dasharray="3,3"/>`;
+    html += `<text x="${pad.l - 6}" y="${yy + 3}" text-anchor="end" fill="#94a3b8" font-size="10">${(maxP * p).toFixed(0)}</text>`;
+  }
+  const points = entries.map((e, i) => [x(i), y(e[1])]);
+  const path = points.map((p, i) => (i === 0 ? `M ${p[0]} ${p[1]}` : `L ${p[0]} ${p[1]}`)).join(' ');
+  html += `<path d="${path}" fill="none" stroke="#fbbf24" stroke-width="2"/>`;
+  points.forEach((p, i) => {
+    html += `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#fbbf24"/>`;
+    html += `<text x="${p[0]}" y="${p[1] - 8}" text-anchor="middle" fill="#e2e8f0" font-size="10">${entries[i][1].toFixed(1)}</text>`;
+  });
+  entries.forEach((e, i) => {
+    html += `<text x="${x(i)}" y="${pad.t + h + 14}" text-anchor="middle" fill="#94a3b8" font-size="10">${escapeHtml(weekLabel(e[0]))}</text>`;
   });
   html += '</svg>';
   return html;
@@ -1674,6 +2051,74 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
+	  </table></div>`;
+}
+
+function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, label) {
+  const { stats, weeks } = computeSubjectBreakdown(records, subject, level, dimension);
+  if (!stats.length) return '<p style="color:var(--muted);font-size:12px;">没有数据</p>';
+  if (!weeks.length) return '<p style="color:var(--muted);font-size:12px;">没有周数据</p>';
+
+  const weekHeaders = weeks
+    .map(w => `<th class="num" title="${escapeHtml(w)}">${escapeHtml(weekLabel(w))}</th>`)
+    .join('');
+
+  const rows = stats.map(s => {
+    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    return `<tr>
+      <td class="col-key">${escapeHtml(s.key)}</td>
+      <td class="num">${s.slots}</td>
+      ${weekCells}
+      <td class="col-trend">${formatAvgTrend(s.weekTrendDelta, s.weekTrendPrev)}</td>
+    </tr>`;
+  }).join('');
+
+  const aggWeekly = {};
+  for (const w of weeks) {
+    aggWeekly[w] = {
+      present: 0, absent: 0, none: 0, sessions: 0,
+      effectiveSessions: 0, unmarkedSessions: 0, effectiveHead: 0,
+      effectivePresent: 0, effectiveAbsent: 0, effectiveNone: 0,
+    };
+    for (const s of stats) {
+      const wd = s.weeks[w];
+      if (!wd) continue;
+      aggWeekly[w].present += wd.present;
+      aggWeekly[w].absent += wd.absent;
+      aggWeekly[w].none += wd.none;
+      aggWeekly[w].sessions += wd.sessions;
+      aggWeekly[w].effectiveSessions += wd.effectiveSessions;
+      aggWeekly[w].unmarkedSessions += wd.unmarkedSessions;
+      aggWeekly[w].effectiveHead += wd.effectiveHead;
+      aggWeekly[w].effectivePresent += wd.effectivePresent || 0;
+      aggWeekly[w].effectiveAbsent += wd.effectiveAbsent || 0;
+      aggWeekly[w].effectiveNone += wd.effectiveNone || 0;
+    }
+  }
+  const aggWeekCells = weeks.map(w => weekHeadCellHtml(aggWeekly[w])).join('');
+  const aggWeekAvgMap = new Map();
+  for (const w of weeks) {
+    const avg = bucketAverageHead(aggWeekly[w]);
+    if (avg != null) aggWeekAvgMap.set(w, avg);
+  }
+  const aggTrend = valueDeltaPair(aggWeekAvgMap, (a, b) => weekOrderOf(a).localeCompare(weekOrderOf(b)));
+  const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
+
+  const aggRow = `<tr class="agg-row">
+    <td>合计</td>
+    <td class="num">${aggSlots}</td>
+    ${aggWeekCells}
+    <td class="col-trend">${formatAvgTrend(aggTrend.delta, aggTrend.prev)}</td>
+  </tr>`;
+
+  return `<div class="month-matrix-wrap"><table class="data month-matrix">
+    <thead><tr>
+      <th>${escapeHtml(label)}</th>
+      <th class="num">时段</th>
+      ${weekHeaders}
+      <th title="最近两个有效周对比">周变化</th>
+    </tr></thead>
+    <tbody>${rows}${aggRow}</tbody>
   </table></div>`;
 }
 
@@ -1712,14 +2157,20 @@ function openSubjectModal(subject, level) {
     <h3>每月出席人次</h3>
     <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
 
+    <h3>每周实际平均人数</h3>
+    <div class="subject-trend-card">${renderWeekHeadChart(stat.weekAvgMap)}</div>
+
     <h3>按老师拆分（合计行在底部）</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'teacherDisplay', '老师')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'teacherDisplay', '老师周统计')}
 
     <h3>按年纪拆分</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'grade', '年纪')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'grade', '年纪周统计')}
 
     <h3>按分行拆分</h3>
     ${renderSubjectBreakdownTable(records, subject, level, 'branch', '分行')}
+    ${renderSubjectWeeklyBreakdownTable(records, subject, level, 'branch', '分行周统计')}
 
     <div class="actions">
       <button id="modal-export-pdf" type="button">📄 导出此科目 PDF</button>
@@ -1755,12 +2206,14 @@ function computeAttendanceBuckets(records, axis, groupBy) {
 
   function bucketKey(r) {
     if (axis === 'month') return r.month || '';
+    if (axis === 'week') return weekOfRecord(r);
     if (axis === 'day') return r.day || '';
     if (axis === 'date') return r.date || '';
     return '';
   }
   function bucketOrder(label) {
     if (axis === 'month') return monthOrderOf(label);
+    if (axis === 'week') return weekOrderOf(label);
     if (axis === 'day') return dayOrderOf(label);
     return label || '';
   }
@@ -2021,8 +2474,8 @@ function nowDateStr() {
 
 function viewLabel(view) {
   if (view === 'gantt') return '周课表 Gantt';
-  if (view === 'teachers') return '老师工作量';
-  if (view === 'subjects') return '科目表现';
+  if (view === 'teachers') return '老师科数表现';
+  if (view === 'subjects') return '全体科目表现';
   if (view === 'attendance') return '出勤表现';
   return view || '';
 }

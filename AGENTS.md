@@ -1513,6 +1513,64 @@ The App must be added to the Base with at least 可阅读 permission.
 * Attendance broken down by 礼拜 and 月份
 * Three views: 周课表 Gantt, 老师工作量, 出勤表现
 
+## Task Update — 2026-05-08
+
+Current task: move V1 from implemented code to live-data validation and
+deployment confidence.
+
+### Working Rule
+
+After completing and verifying requested changes, commit them and push
+directly to GitHub `main` unless the user explicitly asks to hold the
+changes locally or open a separate branch.
+
+### Done
+
+* V1 feature scope is implemented in code:
+  * Lark Base read API with pagination
+  * weekly Gantt
+  * shared filters
+  * teacher workload view
+  * attendance trend view
+  * teacher detail matrices
+  * unified `P / (P + A + N)` attendance formula
+* Documentation now captures the latest attendance-rate decisions:
+  * N counts as absent in every rate calculation
+  * 全勤 requires `A === 0` and `N === 0`
+  * teacher aggregate summary sums from the visible slot matrix
+
+### Active Priority
+
+1. Deploy from GitHub main to Vercel.
+2. Confirm Vercel environment variables:
+   * `LARK_APP_ID`
+   * `LARK_APP_SECRET`
+   * `LARK_BASE_TOKEN`
+   * `LARK_TABLE_ID`
+3. Confirm the Lark App has `bitable:app:readonly` scope and is added
+   to the target Base with read permission.
+4. Smoke test `/api/schedule` on Vercel and verify:
+   * response has `success: true`
+   * records are paginated beyond 500 when needed
+   * normalized fields match the API contract
+   * no credentials are exposed to the frontend
+5. Smoke test the UI with live data:
+   * Gantt renders weekly slots by 分行 and 礼拜
+   * filters update all views
+   * modal session history includes 未点名 rows
+   * teacher detail aggregate equals the slot matrix column totals
+   * 出勤表现 charts use the same attendance formula
+
+### Acceptance Criteria
+
+V1 is considered ready for internal staff review when:
+
+* the deployed URL loads without console errors,
+* `/api/schedule` returns live Lark records from Vercel,
+* dashboard cards and all three views render from the same filtered data,
+* a known busy teacher's modal matches manual Lark Base spot checks, and
+* mobile layout is readable enough for basic review.
+
 ## Pending
 
 * Vercel deployment — confirm env vars are configured and the app

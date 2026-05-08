@@ -865,8 +865,8 @@
 
 <nav class="tabs" id="tabs">
   <button data-view="gantt" class="active">周课表 Gantt</button>
-  <button data-view="teachers">老师工作量</button>
-  <button data-view="subjects">科目表现</button>
+  <button data-view="teachers">老师科数表现</button>
+  <button data-view="subjects">全体科目表现</button>
   <button data-view="attendance">出勤表现</button>
 </nav>
 
@@ -940,11 +940,12 @@
   <section id="view-attendance" class="view" style="display:none">
     <div class="attendance-controls">
       <label>横轴
-        <select id="att-axis">
-          <option value="month">月份</option>
-          <option value="day">礼拜</option>
-          <option value="date">日期</option>
-        </select>
+          <select id="att-axis">
+            <option value="month">月份</option>
+            <option value="week">周次</option>
+            <option value="day">礼拜</option>
+            <option value="date">日期</option>
+          </select>
       </label>
       <label>分组
         <select id="att-group">
