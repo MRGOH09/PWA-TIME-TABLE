@@ -1600,6 +1600,7 @@ Required Lark / Vercel setup:
     or `ALLOWED_EMAILS=<comma-separated allowed emails>`
 * Optional env vars:
   * `AUTH_SUCCESS_URL=https://pwa-time-table.vercel.app/`
+  * `LARK_AUTH_BASE_TOKEN=<permission Base token if different from schedule Base>`
   * `LARK_AUTH_TABLE_ID=<Lark Base permission table id>`
   * `LARK_OAUTH_SCOPE=<only if Lark asks for explicit login scopes>`
   * `LARK_OAUTH_AUTHORIZE_URL=<only if Lark changes the authorize URL>`
@@ -1608,6 +1609,11 @@ Lark Base permission table mode:
 
 * If `LARK_AUTH_TABLE_ID` is set, `/api/auth_callback` uses that table as
   the dashboard whitelist.
+* If the permission table is in a different Lark Base from the schedule
+  table, also set `LARK_AUTH_BASE_TOKEN`.
+* Current permission table from the user-provided URL:
+  * `LARK_AUTH_BASE_TOKEN=Uc7tbsZn0aKoWAsCCa5jU4eopgC`
+  * `LARK_AUTH_TABLE_ID=tblXf3cEvRhdvGVf`
 * Required fields in that table:
   * `姓名`
   * `Open ID`

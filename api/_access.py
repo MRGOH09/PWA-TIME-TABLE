@@ -96,6 +96,9 @@ def check_access(user):
         return True, {"source": "open"}
 
     env = get_env()
+    auth_base_token = os.environ.get("LARK_AUTH_BASE_TOKEN", "").strip()
+    if auth_base_token:
+        env = {**env, "LARK_BASE_TOKEN": auth_base_token}
     token = get_tenant_access_token(env["LARK_APP_ID"], env["LARK_APP_SECRET"])
     records = fetch_all_records(token, env, table_id=auth_table_id)
     for record in records:
