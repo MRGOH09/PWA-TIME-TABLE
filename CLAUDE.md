@@ -1615,6 +1615,7 @@ Lark Base permission table mode:
   * `LARK_AUTH_BASE_TOKEN=Uc7tbsZn0aKoWAsCCa5jU4eopgC`
   * `LARK_AUTH_TABLE_ID=tblXf3cEvRhdvGVf`
 * Required fields in that table:
+  * `Text` (Lark primary text field)
   * `姓名`
   * `Open ID`
   * `Union ID`

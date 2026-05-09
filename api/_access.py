@@ -11,6 +11,7 @@ from _lark import (
 
 
 FIELD_NAME = "姓名"
+FIELD_PRIMARY = "Text"
 FIELD_OPEN_ID = "Open ID"
 FIELD_UNION_ID = "Union ID"
 FIELD_USER_ID = "User ID"
@@ -59,9 +60,12 @@ def _matches_user(fields, user):
 
 
 def _pending_fields(user):
+    name = user.get("name") or "Lark User"
+    open_id = user.get("open_id") or ""
     return {
-        FIELD_NAME: user.get("name") or "Lark User",
-        FIELD_OPEN_ID: user.get("open_id") or "",
+        FIELD_PRIMARY: f"{name} {open_id}".strip(),
+        FIELD_NAME: name,
+        FIELD_OPEN_ID: open_id,
         FIELD_UNION_ID: user.get("union_id") or "",
         FIELD_USER_ID: user.get("user_id") or "",
         FIELD_EMAIL: user.get("email") or "",
