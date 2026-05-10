@@ -437,22 +437,27 @@
   table.month-matrix tbody td.cell-mid  { background: rgba(245,158,11,0.22); color: #f1f5f9; font-weight: 600; }
   table.month-matrix tbody td.cell-low  { background: rgba(239,68,68,0.28);  color: #fff; font-weight: 700; }
   table.month-matrix tbody td.cell-contrib {
-    color: #f8fafc;
     font-weight: 700;
   }
-  table.month-matrix tbody td.contrib-low {
+  table.month-matrix tbody td.contrib-new {
+    background: rgba(56,189,248,0.18);
+    color: #bae6fd;
+  }
+  table.month-matrix tbody td.contrib-flat {
     background: rgba(148,163,184,0.20);
     color: #cbd5e1;
   }
-  table.month-matrix tbody td.contrib-mid {
-    background: rgba(56,189,248,0.20);
-  }
-  table.month-matrix tbody td.contrib-high {
+  table.month-matrix tbody td.contrib-up {
     background: rgba(16,185,129,0.28);
+    color: #d1fae5;
   }
-  table.month-matrix tbody td.contrib-strong {
-    background: rgba(56,189,248,0.42);
-    color: #ffffff;
+  table.month-matrix tbody td.contrib-down {
+    background: rgba(239,68,68,0.26);
+    color: #fee2e2;
+  }
+  table.month-matrix tbody td.contrib-total {
+    background: rgba(245,158,11,0.18);
+    color: #fde68a;
   }
   table.month-matrix tbody tr:hover td:not(.cell-empty):not(.cell-unmarked) {
     filter: brightness(1.15);
@@ -904,10 +909,11 @@
     table.month-matrix tbody td.cell-high { background: #d1fae5 !important; color: #065f46 !important; }
     table.month-matrix tbody td.cell-mid  { background: #fef3c7 !important; color: #78350f !important; }
     table.month-matrix tbody td.cell-low  { background: #fee2e2 !important; color: #7f1d1d !important; }
-    table.month-matrix tbody td.contrib-low { background: #f1f5f9 !important; color: #334155 !important; }
-    table.month-matrix tbody td.contrib-mid { background: #e0f2fe !important; color: #075985 !important; }
-    table.month-matrix tbody td.contrib-high { background: #d1fae5 !important; color: #065f46 !important; }
-    table.month-matrix tbody td.contrib-strong { background: #bae6fd !important; color: #0c4a6e !important; }
+    table.month-matrix tbody td.contrib-new { background: #e0f2fe !important; color: #075985 !important; }
+    table.month-matrix tbody td.contrib-flat { background: #f1f5f9 !important; color: #334155 !important; }
+    table.month-matrix tbody td.contrib-up { background: #d1fae5 !important; color: #065f46 !important; }
+    table.month-matrix tbody td.contrib-down { background: #fee2e2 !important; color: #7f1d1d !important; }
+    table.month-matrix tbody td.contrib-total { background: #fef3c7 !important; color: #78350f !important; }
 
     /* Page break hints */
     .branch-block,
