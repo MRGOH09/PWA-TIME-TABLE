@@ -596,15 +596,18 @@ function weekHeadCellHtml(weekData) {
   return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
 }
 
-function contributionTrend(value, prevData) {
-  if (!prevData || !prevData.effectiveSessions) {
+function periodTrend(value, prevValue, hasPrev) {
+  if (!hasPrev) {
     return { cls: 'contrib-new', label: '无上一期可比' };
   }
-  const prev = prevData.effectiveHead || 0;
-  const delta = value - prev;
+  const delta = value - (prevValue || 0);
   if (delta > 0) return { cls: 'contrib-up', label: `比上一期 +${fmtNum(delta)}` };
   if (delta < 0) return { cls: 'contrib-down', label: `比上一期 ${fmtNum(delta)}` };
   return { cls: 'contrib-flat', label: '与上一期相同' };
+}
+
+function contributionTrend(value, prevData) {
+  return periodTrend(value, prevData ? (prevData.effectiveHead || 0) : 0, Boolean(prevData && prevData.effectiveSessions));
 }
 
 function classCountCellHtml(data, prevData) {
@@ -1648,7 +1651,10 @@ function renderTeacherLeaderboard(records, level) {
     .join('');
 
   const rows = stats.map(s => {
-    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
+    const monthCells = months.map((m, idx) => {
+      const prev = idx > 0 ? s.months[months[idx - 1]] : null;
+      return monthTrendCellHtml(s.months[m], prev);
+    }).join('');
     const branchLabel = s.branches.length ? s.branches.join(', ') : '-';
     return `<tr class="clickable" data-teacher="${escapeHtml(s.teacher)}" data-level="${escapeHtml(level)}">
       <td class="col-key">${escapeHtml(s.teacherDisplay)}</td>
@@ -1676,7 +1682,8 @@ function renderTeacherLeaderboard(records, level) {
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}</tbody>
-	  </table></div>`;
+	  </table></div>
+    <div class="matrix-hint">颜色表示与上月比较：绿=变好，红=变少，灰=持平，蓝=无上月可比。</div>`;
 }
 
 function renderTeacherWeekLeaderboard(records, level) {
@@ -1693,7 +1700,10 @@ function renderTeacherWeekLeaderboard(records, level) {
     .join('');
 
   const rows = stats.map(s => {
-    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    const weekCells = weeks.map((w, idx) => {
+      const prev = idx > 0 ? s.weeks[weeks[idx - 1]] : null;
+      return weekHeadTrendCellHtml(s.weeks[w], prev);
+    }).join('');
     const branchLabel = s.branches.length ? s.branches.join(', ') : '-';
     return `<tr class="clickable" data-teacher="${escapeHtml(s.teacher)}" data-level="${escapeHtml(level)}">
       <td class="col-key">${escapeHtml(s.teacherDisplay)}</td>
@@ -1716,7 +1726,7 @@ function renderTeacherWeekLeaderboard(records, level) {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 的未点名课不纳入正式总人数。</div>`;
+  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 的未点名课不纳入正式总人数。颜色表示与上一周比较：绿=变好，红=变少，灰=持平，蓝=无上一周可比。</div>`;
 }
 
 function renderTeacherBreakdownTable(records, teacher, level, dimension, label) {
@@ -1729,7 +1739,10 @@ function renderTeacherBreakdownTable(records, teacher, level, dimension, label) 
     .join('');
 
   const rows = stats.map(s => {
-    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
+    const monthCells = months.map((m, idx) => {
+      const prev = idx > 0 ? s.months[months[idx - 1]] : null;
+      return monthTrendCellHtml(s.months[m], prev);
+    }).join('');
     return `<tr>
       <td class="col-key">${escapeHtml(s.key)}</td>
       <td class="num">${s.slots}</td>
@@ -1753,7 +1766,10 @@ function renderTeacherBreakdownTable(records, teacher, level, dimension, label) 
       }
     }
   }
-  const aggMonthCells = months.map(m => monthCellHtml(aggMonthly[m])).join('');
+  const aggMonthCells = months.map((m, idx) => {
+    const prev = idx > 0 ? aggMonthly[months[idx - 1]] : null;
+    return monthTrendCellHtml(aggMonthly[m], prev);
+  }).join('');
   const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
   const aggP = stats.reduce((a, s) => a + s.present, 0);
   const aggA = stats.reduce((a, s) => a + s.absent, 0);
@@ -1786,7 +1802,8 @@ function renderTeacherBreakdownTable(records, teacher, level, dimension, label) 
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
-	  </table></div>`;
+	  </table></div>
+    <div class="matrix-hint">颜色表示与上月比较：绿=变好，红=变少，灰=持平，蓝=无上月可比。</div>`;
 }
 
 function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, label) {
@@ -1799,7 +1816,10 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
     .join('');
 
   const rows = stats.map(s => {
-    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    const weekCells = weeks.map((w, idx) => {
+      const prev = idx > 0 ? s.weeks[weeks[idx - 1]] : null;
+      return weekHeadTrendCellHtml(s.weeks[w], prev);
+    }).join('');
     return `<tr>
       <td class="col-key">${escapeHtml(s.key)}</td>
       <td class="num">${s.slots}</td>
@@ -1832,7 +1852,10 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
       aggWeekly[w].pendingHead += wd.pendingHead || 0;
     }
   }
-  const aggWeekCells = weeks.map(w => weekHeadCellHtml(aggWeekly[w])).join('');
+  const aggWeekCells = weeks.map((w, idx) => {
+    const prev = idx > 0 ? aggWeekly[weeks[idx - 1]] : null;
+    return weekHeadTrendCellHtml(aggWeekly[w], prev);
+  }).join('');
   const aggWeekAvgMap = new Map();
   for (const w of weeks) {
     const head = bucketEffectiveHead(aggWeekly[w]);
@@ -1856,7 +1879,8 @@ function renderTeacherWeeklyBreakdownTable(records, teacher, level, dimension, l
       <th title="最近两个有效周对比">周变化</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
-  </table></div>`;
+  </table></div>
+  <div class="matrix-hint">颜色表示与上一周比较：绿=变好，红=变少，灰=持平，蓝=无上一周可比。</div>`;
 }
 
 function renderTeacherClassContributionTable(records, teacher, level, bucketBy) {
@@ -2406,6 +2430,44 @@ function monthCellHtml(monthData) {
   return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${fmtNum(monthData.present)}</td>`;
 }
 
+function monthTrendCellHtml(monthData, prevData) {
+  if (!monthData || (monthData.present + monthData.absent + monthData.none === 0)) {
+    return `<td class="num cell-empty">—</td>`;
+  }
+  if ((monthData.present + monthData.absent) === 0) {
+    return `<td class="num cell-unmarked" title="未点 N=${monthData.none}">未点</td>`;
+  }
+  const prevHasData = Boolean(prevData && ((prevData.present || 0) + (prevData.absent || 0) + (prevData.none || 0)) > 0);
+  const trend = periodTrend(monthData.present || 0, prevData ? (prevData.present || 0) : 0, prevHasData);
+  const tooltip = [
+    `P ${monthData.present || 0}`,
+    `A ${monthData.absent || 0}`,
+    `N ${monthData.none || 0}`,
+    trend.label,
+  ].join('  ');
+  return `<td class="num cell-contrib ${trend.cls}" title="${escapeHtml(tooltip)}">${fmtNum(monthData.present || 0)}</td>`;
+}
+
+function weekHeadTrendCellHtml(weekData, prevData) {
+  if (!weekData || weekData.sessions === 0) {
+    return `<td class="num cell-empty">—</td>`;
+  }
+  const totalHead = bucketEffectiveHead(weekData);
+  if (totalHead == null) {
+    const tooltip = `未纳入：${weekData.unmarkedSessions} 课未点名`;
+    return `<td class="num cell-empty" title="${escapeHtml(tooltip)}">—</td>`;
+  }
+  const prevHead = bucketEffectiveHead(prevData);
+  const trend = periodTrend(totalHead, prevHead || 0, prevHead != null);
+  const tooltip = [
+    `有效总人数 ${fmtNum(totalHead)}`,
+    trend.label,
+    `有效课 ${weekData.effectiveSessions}`,
+    `未纳入未点名课 ${weekData.unmarkedSessions}`,
+  ].join('  ');
+  return `<td class="num cell-contrib ${trend.cls}" title="${escapeHtml(tooltip)}">${fmtNum(totalHead)}人</td>`;
+}
+
 function renderSubjectsView() {
   const records = filteredRecords();
 
@@ -2424,8 +2486,8 @@ function renderSubjectsView() {
     { label: '中学科目', value: sec.stats.length },
     { label: '小学科目', value: pri.stats.length },
     { label: '本期总出席', value: fmtNum(totalP), cls: 'high' },
-    { label: '本期总缺课', value: fmtNum(totalA), cls: 'low' },
-    { label: '本期总未点', value: fmtNum(totalN), cls: 'unmarked' },
+    { label: '本期等同缺席', value: fmtNum(totalA + totalN), cls: 'low' },
+    { label: 'A/N 拆分', value: `${fmtNum(totalA)}/${fmtNum(totalN)}`, cls: 'unmarked' },
     { label: '本期出勤率', value: pct(overallRate), cls: overallRate == null ? 'unmarked' : (overallRate >= 0.8 ? 'high' : (overallRate >= 0.5 ? 'mid' : 'low')) },
   ];
   $('#subjects-summary').innerHTML = cards.map(c => `
@@ -2436,13 +2498,13 @@ function renderSubjectsView() {
   `).join('');
 
   $('#subjects-secondary-wrap').innerHTML = `
-    <div class="subject-section-title">中学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
+    <div class="subject-section-title">中学科目 <span class="small">按总出席降序 · 颜色 = 跟上月比较</span></div>
     ${renderSubjectLeaderboard(records, '中学')}
     <div class="subject-section-title" style="margin-top:18px;">中学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名不纳入正式总人数</span></div>
     ${renderSubjectWeekLeaderboard(records, '中学')}
   `;
   $('#subjects-primary-wrap').innerHTML = `
-    <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序 · 单元格 = 该月出席人次</span></div>
+    <div class="subject-section-title primary">小学科目 <span class="small">按总出席降序 · 颜色 = 跟上月比较</span></div>
     ${renderSubjectLeaderboard(records, '小学')}
     <div class="subject-section-title primary" style="margin-top:18px;">小学科目周总人数 <span class="small">单元格 = 有效总人数 · 未点名不纳入正式总人数</span></div>
     ${renderSubjectWeekLeaderboard(records, '小学')}
@@ -2471,7 +2533,10 @@ function renderSubjectLeaderboard(records, level) {
     .join('');
 
   const rows = stats.map(s => {
-    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
+    const monthCells = months.map((m, idx) => {
+      const prev = idx > 0 ? s.months[months[idx - 1]] : null;
+      return monthTrendCellHtml(s.months[m], prev);
+    }).join('');
     return `<tr class="clickable" data-subject="${escapeHtml(s.subject)}" data-level="${escapeHtml(level)}">
       <td class="col-key">${escapeHtml(s.subject)}</td>
       <td class="num">${s.slots}</td>
@@ -2496,7 +2561,8 @@ function renderSubjectLeaderboard(records, level) {
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}</tbody>
-	  </table></div>`;
+	  </table></div>
+    <div class="matrix-hint">颜色表示与上月比较：绿=变好，红=变少，灰=持平，蓝=无上月可比。</div>`;
 }
 
 function renderSubjectWeekLeaderboard(records, level) {
@@ -2513,7 +2579,10 @@ function renderSubjectWeekLeaderboard(records, level) {
     .join('');
 
   const rows = stats.map(s => {
-    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    const weekCells = weeks.map((w, idx) => {
+      const prev = idx > 0 ? s.weeks[weeks[idx - 1]] : null;
+      return weekHeadTrendCellHtml(s.weeks[w], prev);
+    }).join('');
     return `<tr class="clickable" data-subject="${escapeHtml(s.subject)}" data-level="${escapeHtml(level)}">
       <td class="col-key">${escapeHtml(s.subject)}</td>
       <td class="num">${s.slots}</td>
@@ -2533,7 +2602,7 @@ function renderSubjectWeekLeaderboard(records, level) {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 的未点名课不纳入正式总人数。</div>`;
+  <div class="matrix-hint">周总人数单元格 = 有效总人数。只统计 P+A&gt;0 的课；P+A=0 的未点名课不纳入正式总人数。颜色表示与上一周比较：绿=变好，红=变少，灰=持平，蓝=无上一周可比。</div>`;
 }
 
 function renderSubjectTrendChart(monthPMap) {
@@ -2629,7 +2698,10 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
     .join('');
 
   const rows = stats.map(s => {
-    const monthCells = months.map(m => monthCellHtml(s.months[m])).join('');
+    const monthCells = months.map((m, idx) => {
+      const prev = idx > 0 ? s.months[months[idx - 1]] : null;
+      return monthTrendCellHtml(s.months[m], prev);
+    }).join('');
     return `<tr>
       <td class="col-key">${escapeHtml(s.key)}</td>
       <td class="num">${s.slots}</td>
@@ -2654,7 +2726,10 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
       }
     }
   }
-  const aggMonthCells = months.map(m => monthCellHtml(aggMonthly[m])).join('');
+  const aggMonthCells = months.map((m, idx) => {
+    const prev = idx > 0 ? aggMonthly[months[idx - 1]] : null;
+    return monthTrendCellHtml(aggMonthly[m], prev);
+  }).join('');
   const aggSlots = stats.reduce((a, s) => a + s.slots, 0);
   const aggP = stats.reduce((a, s) => a + s.present, 0);
   const aggA = stats.reduce((a, s) => a + s.absent, 0);
@@ -2687,7 +2762,8 @@ function renderSubjectBreakdownTable(records, subject, level, dimension, label) 
       <th title="第一个月 vs 最后一个月">全期</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
-	  </table></div>`;
+	  </table></div>
+    <div class="matrix-hint">颜色表示与上月比较：绿=变好，红=变少，灰=持平，蓝=无上月可比。</div>`;
 }
 
 function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, label) {
@@ -2700,7 +2776,10 @@ function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, l
     .join('');
 
   const rows = stats.map(s => {
-    const weekCells = weeks.map(w => weekHeadCellHtml(s.weeks[w])).join('');
+    const weekCells = weeks.map((w, idx) => {
+      const prev = idx > 0 ? s.weeks[weeks[idx - 1]] : null;
+      return weekHeadTrendCellHtml(s.weeks[w], prev);
+    }).join('');
     return `<tr>
       <td class="col-key">${escapeHtml(s.key)}</td>
       <td class="num">${s.slots}</td>
@@ -2733,7 +2812,10 @@ function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, l
       aggWeekly[w].pendingHead += wd.pendingHead || 0;
     }
   }
-  const aggWeekCells = weeks.map(w => weekHeadCellHtml(aggWeekly[w])).join('');
+  const aggWeekCells = weeks.map((w, idx) => {
+    const prev = idx > 0 ? aggWeekly[weeks[idx - 1]] : null;
+    return weekHeadTrendCellHtml(aggWeekly[w], prev);
+  }).join('');
   const aggWeekAvgMap = new Map();
   for (const w of weeks) {
     const head = bucketEffectiveHead(aggWeekly[w]);
@@ -2757,7 +2839,8 @@ function renderSubjectWeeklyBreakdownTable(records, subject, level, dimension, l
       <th title="最近两个有效周对比">周变化</th>
     </tr></thead>
     <tbody>${rows}${aggRow}</tbody>
-  </table></div>`;
+  </table></div>
+  <div class="matrix-hint">颜色表示与上一周比较：绿=变好，红=变少，灰=持平，蓝=无上一周可比。</div>`;
 }
 
 function openSubjectModal(subject, level) {
