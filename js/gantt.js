@@ -1698,6 +1698,92 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
   <div class="matrix-hint">${label} = 班级人数 × 有效课次，即每一班贡献的人次科数；未点名课不纳入正式科数。</div>`;
 }
 
+function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
+  const issueRows = records
+    .filter(r => {
+      if (r.teacher !== teacher) return false;
+      if (level && r.level !== level) return false;
+      const absent = r.absent || 0;
+      const none = r.none || 0;
+      return absent > 0 || none > 0;
+    })
+    .sort((a, b) => {
+      const dateCmp = String(b.date || '').localeCompare(String(a.date || ''));
+      if (dateCmp) return dateCmp;
+      return (a.dayOrder - b.dayOrder) || ((a.startMinutes || 0) - (b.startMinutes || 0));
+    });
+
+  if (!issueRows.length) {
+    return `
+      <div class="issue-summary">
+        <div class="issue-card good"><span>缺席人次</span><b>0</b></div>
+        <div class="issue-card good"><span>未点名人次</span><b>0</b></div>
+        <div class="issue-card good"><span>涉及课次</span><b>0</b></div>
+      </div>
+      <p style="color:var(--muted);font-size:12px;">当前筛选范围没有缺席或未点名数据。</p>`;
+  }
+
+  const totalAbsent = issueRows.reduce((sum, r) => sum + (r.absent || 0), 0);
+  const totalNone = issueRows.reduce((sum, r) => sum + (r.none || 0), 0);
+  const unmarkedSessions = issueRows.filter(r => ((r.present || 0) + (r.absent || 0)) === 0 && (r.none || 0) > 0).length;
+  const absentSessions = issueRows.filter(r => (r.absent || 0) > 0).length;
+  const issueSlots = new Set(issueRows.filter(r => r.day && r.timeRange).map(slotKey)).size;
+
+  const rows = issueRows.map(r => {
+    const present = r.present || 0;
+    const absent = r.absent || 0;
+    const none = r.none || 0;
+    const total = present + absent + none;
+    const markedSome = (present + absent) > 0;
+    const status = statusForAttendance(present, absent, none);
+    const label = markedSome ? (absent > 0 ? '有缺席' : '未点名未完成') : '未点名';
+    const rate = markedSome && total > 0 ? pct(present / total) : '未点';
+    return `<tr>
+      <td>${escapeHtml(r.date || '-')}</td>
+      <td>${escapeHtml(r.day || '-')}</td>
+      <td>${escapeHtml(r.timeRange || '-')}</td>
+      <td>${escapeHtml(r.subject || '-')} ${escapeHtml(r.grade || '')}</td>
+      <td>${escapeHtml(r.branch || '-')}</td>
+      <td class="num">${fmtNum(present)}</td>
+      <td class="num cell-low">${fmtNum(absent)}</td>
+      <td class="num cell-unmarked">${fmtNum(none)}</td>
+      <td class="num">${fmtNum(total)}</td>
+      <td class="num cell-${status}">${escapeHtml(rate)}</td>
+      <td>${escapeHtml(label)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="issue-summary">
+      <div class="issue-card low"><span>缺席人次</span><b>${fmtNum(totalAbsent)}</b></div>
+      <div class="issue-card unmarked"><span>未点名人次</span><b>${fmtNum(totalNone)}</b></div>
+      <div class="issue-card"><span>缺席课次</span><b>${fmtNum(absentSessions)}</b></div>
+      <div class="issue-card"><span>未点名课次</span><b>${fmtNum(unmarkedSessions)}</b></div>
+      <div class="issue-card"><span>涉及班级</span><b>${fmtNum(issueSlots)}</b></div>
+    </div>
+    <div class="month-matrix-wrap">
+      <table class="data month-matrix issue-table">
+        <thead><tr>
+          <th>日期</th>
+          <th>礼拜</th>
+          <th>时间</th>
+          <th>课程</th>
+          <th>分行</th>
+          <th class="num">P</th>
+          <th class="num">A</th>
+          <th class="num">N</th>
+          <th class="num">总</th>
+          <th class="num">出勤率</th>
+          <th>状态</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="matrix-hint">
+      这里列出当前筛选范围内 A&gt;0 或 N&gt;0 的课次。N 仍按缺席纳入出勤率；P+A=0 的课显示为“未点名”。
+    </div>`;
+}
+
 function openTeacherModal(teacher, level) {
   const records = filteredRecords();
   const stat = computeTeacherStats(records, level).stats.find(s => s.teacher === teacher);
@@ -1736,6 +1822,9 @@ function openTeacherModal(teacher, level) {
 
     <h3>每周实际总人数</h3>
     <div class="subject-trend-card">${renderWeekHeadChart(stat.weekHeadMap)}</div>
+
+    <h3>缺席 / 未点名数据</h3>
+    ${renderTeacherAbsenceUnmarkedSection(records, teacher, level)}
 
     <h3>每班科数贡献（月）</h3>
     ${renderTeacherClassContributionTable(records, teacher, level, 'month')}

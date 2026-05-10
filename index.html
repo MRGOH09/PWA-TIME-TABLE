@@ -655,6 +655,41 @@
     display: block;
   }
 
+  .issue-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+    margin: 8px 0 10px;
+  }
+  .issue-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .issue-card span {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+  .issue-card b {
+    display: block;
+    font-size: 18px;
+    line-height: 1.2;
+    color: var(--text);
+  }
+  .issue-card.low { border-color: rgba(239,68,68,0.55); }
+  .issue-card.low b { color: var(--status-low); }
+  .issue-card.unmarked { border-color: rgba(148,163,184,0.55); }
+  .issue-card.unmarked b { color: var(--status-unmarked); }
+  .issue-card.good { border-color: rgba(16,185,129,0.45); }
+  .issue-card.good b { color: var(--status-high); }
+  .issue-table td.cell-low,
+  .issue-table td.cell-unmarked {
+    font-weight: 700;
+  }
+
   /* Attendance view */
   .attendance-controls {
     display: flex;
