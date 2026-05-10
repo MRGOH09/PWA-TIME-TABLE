@@ -709,6 +709,10 @@ When `中小 = 中学` is selected, all metrics scope to 中学 only
 
 **N (未点名) is treated as Absent** in all rate calculations.
 This is the single source of truth across every view in the app.
+In UI and PDF summaries, present the main absence metric as
+`等同缺席 = Absent + None`. Keep `Absent / None` only as a source
+breakdown for follow-up: `Absent` means confirmed absent after marking,
+while `None` means not marked yet but still counts as absent.
 
 For each session row:
 

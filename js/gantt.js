@@ -1143,8 +1143,8 @@ function renderSummary() {
     { label: '总周课时段数', value: slots.length },
     { label: '总记录数', value: records.length },
     { label: '本期到课人次', value: present, cls: 'high' },
-    { label: '本期缺课人次', value: absent, cls: 'low' },
-    { label: '本期未点名人次', value: none, cls: 'unmarked' },
+    { label: '本期等同缺席', value: absent + none, cls: 'low' },
+    { label: 'A/N 拆分', value: `${absent}/${none}`, cls: 'unmarked' },
     { label: '本期出勤率', value: pct(rate), cls: rate == null ? 'unmarked' : (rate >= 0.8 ? 'high' : (rate >= 0.5 ? 'mid' : 'low')) },
   ];
 
@@ -1583,8 +1583,8 @@ function renderTeachersView() {
     { label: '中学老师', value: sec.stats.length },
     { label: '小学老师', value: pri.stats.length },
     { label: '本期总出席', value: fmtNum(totalP), cls: 'high' },
-    { label: '本期总缺课', value: fmtNum(totalA), cls: 'low' },
-    { label: '本期总未点', value: fmtNum(totalN), cls: 'unmarked' },
+    { label: '本期等同缺席', value: fmtNum(totalA + totalN), cls: 'low' },
+    { label: 'A/N 拆分', value: `${fmtNum(totalA)}/${fmtNum(totalN)}`, cls: 'unmarked' },
     { label: '本期出勤率', value: pct(overallRate), cls: overallRate == null ? 'unmarked' : (overallRate >= 0.8 ? 'high' : (overallRate >= 0.5 ? 'mid' : 'low')) },
   ];
   $('#teachers-summary').innerHTML = cards.map(c => `
@@ -1908,25 +1908,26 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
   if (!issueRows.length) {
     return `
       <div class="issue-summary">
-        <div class="issue-card good"><span>缺席人次</span><b>0</b></div>
-        <div class="issue-card good"><span>未点名人次</span><b>0</b></div>
+        <div class="issue-card good"><span>等同缺席人次</span><b>0</b></div>
+        <div class="issue-card good"><span>A/N 拆分</span><b>0/0</b></div>
         <div class="issue-card good"><span>涉及课次</span><b>0</b></div>
       </div>
-      <p style="color:var(--muted);font-size:12px;">当前筛选范围没有缺席或未点名数据。</p>`;
+      <p style="color:var(--muted);font-size:12px;">当前筛选范围没有等同缺席数据。</p>`;
   }
 
   function issueLabel(r) {
     const present = r.present || 0;
     const absent = r.absent || 0;
     const none = r.none || 0;
-    if ((present + absent) === 0 && none > 0) return '完全未点';
-    if (absent > 0 && none > 0) return '有缺席 + 点名未完成';
-    if (absent > 0) return '有缺席';
-    return '点名未完成';
+    if ((present + absent) === 0 && none > 0) return '全班等同缺席';
+    if (absent > 0 && none > 0) return 'A+N 等同缺席';
+    if (absent > 0) return '已记录缺席';
+    return 'N 等同缺席';
   }
 
   const totalAbsent = issueRows.reduce((sum, r) => sum + (r.absent || 0), 0);
   const totalNone = issueRows.reduce((sum, r) => sum + (r.none || 0), 0);
+  const totalEquivalentAbsent = totalAbsent + totalNone;
   const unmarkedSessions = issueRows.filter(r => ((r.present || 0) + (r.absent || 0)) === 0 && (r.none || 0) > 0).length;
   const partialSessions = issueRows.filter(r => ((r.present || 0) + (r.absent || 0)) > 0 && (r.none || 0) > 0).length;
   const absentSessions = issueRows.filter(r => (r.absent || 0) > 0).length;
@@ -1989,6 +1990,7 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
       <td>${escapeHtml(slot.day || '-')}</td>
       <td>${escapeHtml(slot.timeRange || '-')}</td>
       <td class="num">${fmtNum(slot.classSize)}</td>
+      <td class="num cell-low">${fmtNum(slot.absent + slot.none)}</td>
       <td class="num cell-unmarked">${fmtNum(slot.none)}</td>
       <td class="num cell-low">${fmtNum(slot.absent)}</td>
       <td class="num">${fmtNum(slot.unmarkedSessions)}</td>
@@ -2035,14 +2037,14 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
 
   return `
     <div class="issue-summary">
-      <div class="issue-card low"><span>缺席人次</span><b>${fmtNum(totalAbsent)}</b></div>
-      <div class="issue-card unmarked"><span>未点名人次</span><b>${fmtNum(totalNone)}</b></div>
-      <div class="issue-card"><span>缺席课次</span><b>${fmtNum(absentSessions)}</b></div>
-      <div class="issue-card"><span>未点名课次</span><b>${fmtNum(unmarkedSessions)}</b></div>
-      <div class="issue-card"><span>点名未完成课次</span><b>${fmtNum(partialSessions)}</b></div>
+      <div class="issue-card low"><span>等同缺席人次</span><b>${fmtNum(totalEquivalentAbsent)}</b></div>
+      <div class="issue-card unmarked"><span>A/N 拆分</span><b>${fmtNum(totalAbsent)}/${fmtNum(totalNone)}</b></div>
+      <div class="issue-card"><span>已确认缺席课次</span><b>${fmtNum(absentSessions)}</b></div>
+      <div class="issue-card"><span>全班等同缺席课次</span><b>${fmtNum(unmarkedSessions)}</b></div>
+      <div class="issue-card"><span>部分等同缺席课次</span><b>${fmtNum(partialSessions)}</b></div>
       <div class="issue-card"><span>涉及班级</span><b>${fmtNum(issueSlots.length)}</b></div>
     </div>
-    <h4 class="issue-subtitle">按班级汇总</h4>
+    <h4 class="issue-subtitle">按班级汇总 <span>总等缺 = A + N</span></h4>
     <div class="month-matrix-wrap">
       <table class="data month-matrix issue-table">
         <thead><tr>
@@ -2051,17 +2053,18 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
           <th>礼拜</th>
           <th>时间</th>
           <th class="num">人数</th>
-          <th class="num">总N</th>
-          <th class="num">总A</th>
-          <th class="num">未点课次</th>
-          <th class="num">未完成课次</th>
+          <th class="num">总等缺</th>
+          <th class="num">N来源</th>
+          <th class="num">A来源</th>
+          <th class="num">全班等缺</th>
+          <th class="num">部分等缺</th>
           <th class="num">最低出勤率</th>
           <th>最近日期</th>
         </tr></thead>
         <tbody>${slotRows}</tbody>
       </table>
     </div>
-    <h4 class="issue-subtitle">重点明细 <span>最多显示 ${detailLimit} 条，完全未点优先</span></h4>
+    <h4 class="issue-subtitle">重点明细 <span>最多显示 ${detailLimit} 条，全班等同缺席优先</span></h4>
     <div class="month-matrix-wrap">
       <table class="data month-matrix issue-table">
         <thead><tr>
@@ -2071,8 +2074,8 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
           <th>课程</th>
           <th>分行</th>
           <th class="num">P</th>
-          <th class="num">A</th>
-          <th class="num">N</th>
+          <th class="num">A来源</th>
+          <th class="num">N来源</th>
           <th class="num">总</th>
           <th class="num">出勤率</th>
           <th>状态</th>
@@ -2081,8 +2084,9 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
       </table>
     </div>
     <div class="matrix-hint">
-      这里统计当前筛选范围内 A&gt;0 或 N&gt;0 的课次。N 仍按缺席纳入出勤率；
-      P+A=0 显示“完全未点”。明细限制数量是为了让 PDF 保持可读；完整资料仍可在 Lark Base 或筛选后的页面继续追查。
+      这里统计当前筛选范围内的等同缺席：<b>等同缺席 = A + N</b>。
+      A 是已记录缺席来源，N 是未点名来源；两者在出勤率里都按缺席处理。
+      明细限制数量是为了让 PDF 保持可读；完整资料仍可在 Lark Base 或筛选后的页面继续追查。
     </div>`;
 }
 
@@ -2109,11 +2113,11 @@ function openTeacherModal(teacher, level) {
 	      <dt>班数</dt><dd>${stat.slots}班</dd>
       <dt>科目</dt><dd>${stat.subjects.length ? escapeHtml(stat.subjects.join(', ')) : '-'}</dd>
       <dt>年纪</dt><dd>${stat.grades.length ? escapeHtml(stat.grades.join(', ')) : '-'}</dd>
-	      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
-	      <dt>预估满课数</dt><dd>${fmtNum(stat.classSize * 4)}</dd>
+      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+      <dt>预估满课数</dt><dd>${fmtNum(stat.classSize * 4)}</dd>
       <dt>本期出席</dt><dd><b style="font-size:16px;">${fmtNum(stat.present)}</b></dd>
-      <dt>本期缺课</dt><dd>${fmtNum(stat.absent)}</dd>
-      <dt>本期未点</dt><dd>${fmtNum(stat.none)}</dd>
+      <dt>等同缺席</dt><dd>${fmtNum(stat.absent + stat.none)}</dd>
+      <dt>A/N拆分</dt><dd>${fmtNum(stat.absent)} / ${fmtNum(stat.none)}</dd>
       <dt>出勤率</dt><dd>${pct(stat.rate)}</dd>
       <dt>月环比</dt><dd>${trendBadge}</dd>
       <dt>全期进步</dt><dd>${overallBadge}</dd>
@@ -2128,7 +2132,7 @@ function openTeacherModal(teacher, level) {
     <h3>每周实际总人数</h3>
     <div class="subject-trend-card">${renderWeekHeadChart(stat.weekHeadMap)}</div>
 
-    <h3>缺席 / 未点名数据</h3>
+    <h3>等同缺席数据（N = 缺席）</h3>
     ${renderTeacherAbsenceUnmarkedSection(records, teacher, level)}
 
     <h3>每班科数贡献（月）</h3>
@@ -2753,11 +2757,11 @@ function openSubjectModal(subject, level) {
 	      <dt>班数</dt><dd>${stat.slots}班</dd>
       <dt>老师数</dt><dd>${stat.teachers.length}</dd>
       <dt>年纪</dt><dd>${stat.grades.length ? escapeHtml(stat.grades.join(', ')) : '-'}</dd>
-	      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
-	      <dt>预估满课数</dt><dd>${fmtNum(stat.classSize * 4)}</dd>
+      <dt>班级总人数</dt><dd>${fmtNum(stat.classSize)}</dd>
+      <dt>预估满课数</dt><dd>${fmtNum(stat.classSize * 4)}</dd>
       <dt>本期出席</dt><dd><b style="font-size:16px;">${fmtNum(stat.present)}</b></dd>
-      <dt>本期缺课</dt><dd>${fmtNum(stat.absent)}</dd>
-      <dt>本期未点</dt><dd>${fmtNum(stat.none)}</dd>
+      <dt>等同缺席</dt><dd>${fmtNum(stat.absent + stat.none)}</dd>
+      <dt>A/N拆分</dt><dd>${fmtNum(stat.absent)} / ${fmtNum(stat.none)}</dd>
       <dt>出勤率</dt><dd>${pct(stat.rate)}</dd>
       <dt>月环比</dt><dd>${trendBadge}</dd>
       <dt>全期进步</dt><dd>${overallBadge}</dd>
