@@ -21,7 +21,10 @@ FIELD_STATUS = "状态"
 FIELD_NOTE = "备注"
 FIELD_LAST_LOGIN = "最后登录"
 
-YES_VALUES = {"yes", "y", "true", "1", "allow", "allowed", "active", "启用", "允许", "可以", "是", "✅", "通过"}
+YES_VALUES = {
+    "yes", "y", "true", "1", "allow", "allowed", "active", "approved", "approve",
+    "启用", "允许", "允许进入", "可以", "可以进入", "是", "已批准", "批准", "通过", "✅",
+}
 
 
 def _now_text():
@@ -30,8 +33,25 @@ def _now_text():
 
 
 def _truthy(value):
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, list):
+        return any(_truthy(item) for item in value)
+    if isinstance(value, dict):
+        for key in ("text", "value", "name", "en_name"):
+            if key in value and _truthy(value.get(key)):
+                return True
+        return False
     text = extract_text(value).strip().lower()
     return text in YES_VALUES
+
+
+def _access_allowed(fields):
+    return _truthy(fields.get(FIELD_ALLOWED))
 
 
 def _user_ids(user):
@@ -109,7 +129,7 @@ def check_access(user):
         fields = record.get("fields", {}) or {}
         if not _matches_user(fields, user):
             continue
-        allowed = _truthy(fields.get(FIELD_ALLOWED))
+        allowed = _access_allowed(fields)
         return allowed, {
             "source": "lark_table",
             "registered": True,
