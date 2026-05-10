@@ -772,7 +772,7 @@ function computeTeacherAttendanceClassTrend(records, teacher, level) {
 }
 
 function renderTeacherAttendanceClassTrend(records, teacher, level) {
-  const { groups, months, insufficient } = computeTeacherAttendanceClassTrend(records, teacher, level);
+  const { groups, insufficient } = computeTeacherAttendanceClassTrend(records, teacher, level);
   const totalClassified = groups.improving.length + groups.steady.length + groups.declining.length;
   if (!totalClassified) {
     return `
@@ -798,7 +798,7 @@ function renderTeacherAttendanceClassTrend(records, teacher, level) {
     return `<span class="trend-down">↓ ${delta.toFixed(1)}人${pctStr}</span>`;
   }
 
-  function categoryTable(title, key, cls, note) {
+  function categoryTable(title, key, note) {
     const list = groups[key];
     if (!list.length) {
       return `
@@ -844,9 +844,9 @@ function renderTeacherAttendanceClassTrend(records, teacher, level) {
       <div class="issue-card low"><span>持续退步班</span><b>${fmtNum(groups.declining.length)}</b></div>
       <div class="issue-card unmarked"><span>资料不足</span><b>${fmtNum(insufficient)}</b></div>
     </div>
-    ${categoryTable('持续进步班', 'improving', 'good', '平均出席人数明显上升，且月份走势大致不回落')}
-    ${categoryTable('持续保持班', 'steady', '', '没有明显上升/下降，或只属于正常小波动')}
-    ${categoryTable('持续退步班', 'declining', 'low', '平均出席人数明显下降，且月份走势大致不反弹')}
+    ${categoryTable('持续进步班', 'improving', '平均出席人数明显上升，且月份走势大致不回落')}
+    ${categoryTable('持续保持班', 'steady', '没有明显上升/下降，或只属于正常小波动')}
+    ${categoryTable('持续退步班', 'declining', '平均出席人数明显下降，且月份走势大致不反弹')}
     <div class="matrix-hint">
       分类口径：按每班“每月平均每课出席人数”判断，避免 4 次课月份和 5 次课月份直接比总 P 造成误判。
       只纳入 P+A&gt;0 的已点名课；完全未点名课不参与趋势。至少 3 个已点名月份才分类；
