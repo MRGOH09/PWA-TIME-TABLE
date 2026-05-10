@@ -76,6 +76,12 @@ Note: the working directory is `老师时间表` (Chinese characters).
 Local Vercel CLI may fail when project directory name contains Chinese characters.
 Prefer pushing to GitHub and letting Vercel build from the remote.
 
+## Push After Changes
+
+When Codex makes any source, config, or documentation changes in this
+repository, it should verify the change, commit it, and push it to GitHub
+after the work is done, unless the user explicitly says not to push.
+
 ---
 
 # 3. Environment Variables

@@ -662,6 +662,198 @@ function computeTeacherClassContributions(records, teacher, level) {
   return { slots, months, weeks };
 }
 
+function classifyAttendanceTrend(points) {
+  if (points.length < 3) return 'insufficient';
+  const values = points.map(p => p.avgPresent);
+  const first = values[0];
+  const last = values[values.length - 1];
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+  const range = Math.max(...values) - Math.min(...values);
+  const totalDelta = last - first;
+  const meaningfulDelta = Math.max(1, mean * 0.05);
+  const stableRange = Math.max(2, mean * 0.1);
+  const stepTolerance = 0.5;
+  const deltas = values.slice(1).map((v, i) => v - values[i]);
+  const mostlyUp = deltas.filter(d => d >= -stepTolerance).length >= deltas.length - 1;
+  const mostlyDown = deltas.filter(d => d <= stepTolerance).length >= deltas.length - 1;
+
+  if (totalDelta >= meaningfulDelta && mostlyUp) return 'improving';
+  if (totalDelta <= -meaningfulDelta && mostlyDown) return 'declining';
+  if (Math.abs(totalDelta) < meaningfulDelta || range <= stableRange) return 'steady';
+  return 'steady';
+}
+
+function computeTeacherAttendanceClassTrend(records, teacher, level) {
+  const filtered = records.filter(r =>
+    r.teacher === teacher && (!level || r.level === level) && r.day && r.timeRange
+  );
+  const slotMap = new Map();
+  const monthSet = new Set();
+
+  for (const r of filtered) {
+    if (!r.month) continue;
+    const present = r.present || 0;
+    const absent = r.absent || 0;
+    const none = r.none || 0;
+    if ((present + absent) === 0) continue;
+    monthSet.add(r.month);
+    const sk = slotKey(r);
+    if (!slotMap.has(sk)) {
+      slotMap.set(sk, {
+        key: sk,
+        branch: r.branch,
+        day: r.day,
+        dayOrder: r.dayOrder,
+        timeRange: r.timeRange,
+        startMinutes: r.startMinutes,
+        subject: r.subject,
+        grade: r.grade,
+        classSize: 0,
+        months: {},
+      });
+    }
+    const slot = slotMap.get(sk);
+    if ((r.classSize || 0) > slot.classSize) slot.classSize = r.classSize || 0;
+    if (!slot.months[r.month]) {
+      slot.months[r.month] = { present: 0, absent: 0, none: 0, sessions: 0 };
+    }
+    slot.months[r.month].present += present;
+    slot.months[r.month].absent += absent;
+    slot.months[r.month].none += none;
+    slot.months[r.month].sessions += 1;
+  }
+
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const groups = { improving: [], steady: [], declining: [] };
+  let insufficient = 0;
+
+  for (const slot of slotMap.values()) {
+    const points = months
+      .map(month => {
+        const m = slot.months[month];
+        if (!m || !m.sessions) return null;
+        return {
+          month,
+          present: m.present,
+          sessions: m.sessions,
+          avgPresent: m.present / m.sessions,
+          absent: m.absent,
+          none: m.none,
+        };
+      })
+      .filter(Boolean);
+    const category = classifyAttendanceTrend(points);
+    if (category === 'insufficient') {
+      insufficient += 1;
+      continue;
+    }
+    const first = points[0];
+    const last = points[points.length - 1];
+    groups[category].push({
+      ...slot,
+      points,
+      firstAvg: first.avgPresent,
+      lastAvg: last.avgPresent,
+      delta: last.avgPresent - first.avgPresent,
+      firstMonth: first.month,
+      lastMonth: last.month,
+    });
+  }
+
+  for (const key of Object.keys(groups)) {
+    groups[key].sort((a, b) =>
+      Math.abs(b.delta) - Math.abs(a.delta)
+      || (a.dayOrder - b.dayOrder)
+      || ((a.startMinutes || 0) - (b.startMinutes || 0))
+    );
+  }
+
+  return { groups, months, insufficient };
+}
+
+function renderTeacherAttendanceClassTrend(records, teacher, level) {
+  const { groups, months, insufficient } = computeTeacherAttendanceClassTrend(records, teacher, level);
+  const totalClassified = groups.improving.length + groups.steady.length + groups.declining.length;
+  if (!totalClassified) {
+    return `
+      <div class="issue-summary">
+        <div class="issue-card good"><span>持续进步班</span><b>0</b></div>
+        <div class="issue-card"><span>持续保持班</span><b>0</b></div>
+        <div class="issue-card low"><span>持续退步班</span><b>0</b></div>
+      </div>
+      <p style="color:var(--muted);font-size:12px;">目前没有足够月份可分类。每个班至少需要 3 个已点名月份。</p>`;
+  }
+
+  function sequenceLabel(slot) {
+    return slot.points
+      .map(p => `${String(p.month).split('.')[1] || p.month}:${p.avgPresent.toFixed(1)}`)
+      .join(' → ');
+  }
+
+  function avgPresentTrend(delta, prev) {
+    if (delta == null || isNaN(delta)) return '<span class="trend-flat">—</span>';
+    const pctStr = prev > 0 ? ` (${delta >= 0 ? '+' : ''}${(delta / prev * 100).toFixed(1)}%)` : '';
+    if (Math.abs(delta) < 0.05) return `<span class="trend-flat">→ 0${pctStr}</span>`;
+    if (delta > 0) return `<span class="trend-up">↑ +${delta.toFixed(1)}人${pctStr}</span>`;
+    return `<span class="trend-down">↓ ${delta.toFixed(1)}人${pctStr}</span>`;
+  }
+
+  function categoryTable(title, key, cls, note) {
+    const list = groups[key];
+    if (!list.length) {
+      return `
+        <h4 class="issue-subtitle">${escapeHtml(title)} <span>${escapeHtml(note)}</span></h4>
+        <p style="color:var(--muted);font-size:12px;">暂无班级。</p>`;
+    }
+    const rows = list.map(slot => `
+      <tr>
+        <td>${escapeHtml(slot.subject || '-')} ${escapeHtml(slot.grade || '')}</td>
+        <td>${escapeHtml(slot.branch || '-')}</td>
+        <td>${escapeHtml(slot.day || '-')}</td>
+        <td>${escapeHtml(slot.timeRange || '-')}</td>
+        <td class="num">${fmtNum(slot.classSize)}</td>
+        <td class="num">${slot.firstAvg.toFixed(1)}</td>
+        <td class="num">${slot.lastAvg.toFixed(1)}</td>
+        <td class="col-trend">${avgPresentTrend(slot.delta, slot.firstAvg)}</td>
+        <td>${escapeHtml(sequenceLabel(slot))}</td>
+      </tr>`).join('');
+    return `
+      <h4 class="issue-subtitle">${escapeHtml(title)} <span>${escapeHtml(note)}</span></h4>
+      <div class="month-matrix-wrap">
+        <table class="data month-matrix issue-table">
+          <thead><tr>
+            <th>课程</th>
+            <th>分行</th>
+            <th>礼拜</th>
+            <th>时间</th>
+            <th class="num">人数</th>
+            <th class="num">首月平均P/课</th>
+            <th class="num">最近平均P/课</th>
+            <th>变化</th>
+            <th>月份走势</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  return `
+    <div class="issue-summary">
+      <div class="issue-card good"><span>持续进步班</span><b>${fmtNum(groups.improving.length)}</b></div>
+      <div class="issue-card"><span>持续保持班</span><b>${fmtNum(groups.steady.length)}</b></div>
+      <div class="issue-card low"><span>持续退步班</span><b>${fmtNum(groups.declining.length)}</b></div>
+      <div class="issue-card unmarked"><span>资料不足</span><b>${fmtNum(insufficient)}</b></div>
+    </div>
+    ${categoryTable('持续进步班', 'improving', 'good', '平均出席人数明显上升，且月份走势大致不回落')}
+    ${categoryTable('持续保持班', 'steady', '', '没有明显上升/下降，或只属于正常小波动')}
+    ${categoryTable('持续退步班', 'declining', 'low', '平均出席人数明显下降，且月份走势大致不反弹')}
+    <div class="matrix-hint">
+      分类口径：按每班“每月平均每课出席人数”判断，避免 4 次课月份和 5 次课月份直接比总 P 造成误判。
+      只纳入 P+A&gt;0 的已点名课；完全未点名课不参与趋势。至少 3 个已点名月份才分类；
+      明显变化门槛为至少 1 人或约 5%，持续保持班包含正常波动。
+    </div>`;
+}
+
 // ===================================================================
 // Data loading + localStorage cache
 // ===================================================================
@@ -1723,20 +1915,108 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
       <p style="color:var(--muted);font-size:12px;">当前筛选范围没有缺席或未点名数据。</p>`;
   }
 
+  function issueLabel(r) {
+    const present = r.present || 0;
+    const absent = r.absent || 0;
+    const none = r.none || 0;
+    if ((present + absent) === 0 && none > 0) return '完全未点';
+    if (absent > 0 && none > 0) return '有缺席 + 点名未完成';
+    if (absent > 0) return '有缺席';
+    return '点名未完成';
+  }
+
   const totalAbsent = issueRows.reduce((sum, r) => sum + (r.absent || 0), 0);
   const totalNone = issueRows.reduce((sum, r) => sum + (r.none || 0), 0);
   const unmarkedSessions = issueRows.filter(r => ((r.present || 0) + (r.absent || 0)) === 0 && (r.none || 0) > 0).length;
+  const partialSessions = issueRows.filter(r => ((r.present || 0) + (r.absent || 0)) > 0 && (r.none || 0) > 0).length;
   const absentSessions = issueRows.filter(r => (r.absent || 0) > 0).length;
-  const issueSlots = new Set(issueRows.filter(r => r.day && r.timeRange).map(slotKey)).size;
+  const issueSlotMap = new Map();
+  for (const r of issueRows) {
+    if (!r.day || !r.timeRange) continue;
+    const key = slotKey(r);
+    if (!issueSlotMap.has(key)) {
+      issueSlotMap.set(key, {
+        branch: r.branch,
+        day: r.day,
+        dayOrder: r.dayOrder,
+        timeRange: r.timeRange,
+        startMinutes: r.startMinutes,
+        subject: r.subject,
+        grade: r.grade,
+        classSize: 0,
+        sessions: 0,
+        absent: 0,
+        none: 0,
+        unmarkedSessions: 0,
+        partialSessions: 0,
+        latestDate: '',
+        minRate: null,
+      });
+    }
+    const slot = issueSlotMap.get(key);
+    const present = r.present || 0;
+    const absent = r.absent || 0;
+    const none = r.none || 0;
+    const total = present + absent + none;
+    slot.sessions += 1;
+    slot.absent += absent;
+    slot.none += none;
+    if ((r.classSize || 0) > slot.classSize) slot.classSize = r.classSize || 0;
+    if (String(r.date || '') > String(slot.latestDate || '')) slot.latestDate = r.date || '';
+    if ((present + absent) === 0 && none > 0) {
+      slot.unmarkedSessions += 1;
+    } else {
+      slot.partialSessions += 1;
+      if (total > 0) {
+        const rate = present / total;
+        slot.minRate = slot.minRate == null ? rate : Math.min(slot.minRate, rate);
+      }
+    }
+  }
 
-  const rows = issueRows.map(r => {
+  const issueSlots = Array.from(issueSlotMap.values()).sort((a, b) =>
+    (b.none + b.absent) - (a.none + a.absent)
+    || b.unmarkedSessions - a.unmarkedSessions
+    || String(b.latestDate || '').localeCompare(String(a.latestDate || ''))
+    || (a.dayOrder - b.dayOrder)
+    || ((a.startMinutes || 0) - (b.startMinutes || 0))
+  );
+
+  const slotRows = issueSlots.map(slot => `
+    <tr>
+      <td>${escapeHtml(slot.subject || '-')} ${escapeHtml(slot.grade || '')}</td>
+      <td>${escapeHtml(slot.branch || '-')}</td>
+      <td>${escapeHtml(slot.day || '-')}</td>
+      <td>${escapeHtml(slot.timeRange || '-')}</td>
+      <td class="num">${fmtNum(slot.classSize)}</td>
+      <td class="num cell-unmarked">${fmtNum(slot.none)}</td>
+      <td class="num cell-low">${fmtNum(slot.absent)}</td>
+      <td class="num">${fmtNum(slot.unmarkedSessions)}</td>
+      <td class="num">${fmtNum(slot.partialSessions)}</td>
+      <td class="num">${slot.minRate == null ? '未点' : pct(slot.minRate)}</td>
+      <td>${escapeHtml(slot.latestDate || '-')}</td>
+    </tr>`).join('');
+
+  const detailLimit = 30;
+  const priorityRows = issueRows
+    .slice()
+    .sort((a, b) => {
+      const aUnmarked = ((a.present || 0) + (a.absent || 0)) === 0 && (a.none || 0) > 0 ? 1 : 0;
+      const bUnmarked = ((b.present || 0) + (b.absent || 0)) === 0 && (b.none || 0) > 0 ? 1 : 0;
+      return bUnmarked - aUnmarked
+        || String(b.date || '').localeCompare(String(a.date || ''))
+        || (b.none || 0) - (a.none || 0)
+        || (b.absent || 0) - (a.absent || 0);
+    })
+    .slice(0, detailLimit);
+
+  const rows = priorityRows.map(r => {
     const present = r.present || 0;
     const absent = r.absent || 0;
     const none = r.none || 0;
     const total = present + absent + none;
     const markedSome = (present + absent) > 0;
     const status = statusForAttendance(present, absent, none);
-    const label = markedSome ? (absent > 0 ? '有缺席' : '未点名未完成') : '未点名';
     const rate = markedSome && total > 0 ? pct(present / total) : '未点';
     return `<tr>
       <td>${escapeHtml(r.date || '-')}</td>
@@ -1749,7 +2029,7 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
       <td class="num cell-unmarked">${fmtNum(none)}</td>
       <td class="num">${fmtNum(total)}</td>
       <td class="num cell-${status}">${escapeHtml(rate)}</td>
-      <td>${escapeHtml(label)}</td>
+      <td>${escapeHtml(issueLabel(r))}</td>
     </tr>`;
   }).join('');
 
@@ -1759,8 +2039,29 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
       <div class="issue-card unmarked"><span>未点名人次</span><b>${fmtNum(totalNone)}</b></div>
       <div class="issue-card"><span>缺席课次</span><b>${fmtNum(absentSessions)}</b></div>
       <div class="issue-card"><span>未点名课次</span><b>${fmtNum(unmarkedSessions)}</b></div>
-      <div class="issue-card"><span>涉及班级</span><b>${fmtNum(issueSlots)}</b></div>
+      <div class="issue-card"><span>点名未完成课次</span><b>${fmtNum(partialSessions)}</b></div>
+      <div class="issue-card"><span>涉及班级</span><b>${fmtNum(issueSlots.length)}</b></div>
     </div>
+    <h4 class="issue-subtitle">按班级汇总</h4>
+    <div class="month-matrix-wrap">
+      <table class="data month-matrix issue-table">
+        <thead><tr>
+          <th>课程</th>
+          <th>分行</th>
+          <th>礼拜</th>
+          <th>时间</th>
+          <th class="num">人数</th>
+          <th class="num">总N</th>
+          <th class="num">总A</th>
+          <th class="num">未点课次</th>
+          <th class="num">未完成课次</th>
+          <th class="num">最低出勤率</th>
+          <th>最近日期</th>
+        </tr></thead>
+        <tbody>${slotRows}</tbody>
+      </table>
+    </div>
+    <h4 class="issue-subtitle">重点明细 <span>最多显示 ${detailLimit} 条，完全未点优先</span></h4>
     <div class="month-matrix-wrap">
       <table class="data month-matrix issue-table">
         <thead><tr>
@@ -1780,7 +2081,8 @@ function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
       </table>
     </div>
     <div class="matrix-hint">
-      这里列出当前筛选范围内 A&gt;0 或 N&gt;0 的课次。N 仍按缺席纳入出勤率；P+A=0 的课显示为“未点名”。
+      这里统计当前筛选范围内 A&gt;0 或 N&gt;0 的课次。N 仍按缺席纳入出勤率；
+      P+A=0 显示“完全未点”。明细限制数量是为了让 PDF 保持可读；完整资料仍可在 Lark Base 或筛选后的页面继续追查。
     </div>`;
 }
 
@@ -1819,6 +2121,9 @@ function openTeacherModal(teacher, level) {
 
     <h3>每月出席人次</h3>
     <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
+
+    <h3>出席人数趋势分类</h3>
+    ${renderTeacherAttendanceClassTrend(records, teacher, level)}
 
     <h3>每周实际总人数</h3>
     <div class="subject-trend-card">${renderWeekHeadChart(stat.weekHeadMap)}</div>
