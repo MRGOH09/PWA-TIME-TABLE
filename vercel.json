@@ -3,8 +3,9 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": ".",
-  "rewrites": [
-    { "source": "/", "destination": "/api/page" },
-    { "source": "/index.html", "destination": "/api/page" }
+  "routes": [
+    { "src": "^/$", "dest": "/api/page.py" },
+    { "src": "^/index\\.html$", "dest": "/api/page.py" },
+    { "handle": "filesystem" }
   ]
 }
