@@ -2416,6 +2416,181 @@ function computeSubjectBreakdown(records, subject, level, dimension) {
   return { stats, months, weeks };
 }
 
+function computeSubjectAttendanceClassTrend(records, subject, level) {
+  const filtered = records.filter(r =>
+    r.subject === subject && (!level || r.level === level) && r.day && r.timeRange
+  );
+  const slotMap = new Map();
+  const monthSet = new Set();
+
+  for (const r of filtered) {
+    if (!r.month) continue;
+    const present = r.present || 0;
+    const absent = r.absent || 0;
+    const none = r.none || 0;
+    if ((present + absent) === 0) continue;
+    monthSet.add(r.month);
+    const sk = slotKey(r);
+    if (!slotMap.has(sk)) {
+      slotMap.set(sk, {
+        key: sk,
+        branch: r.branch,
+        day: r.day,
+        dayOrder: r.dayOrder,
+        timeRange: r.timeRange,
+        startMinutes: r.startMinutes,
+        teacher: r.teacher,
+        teacherDisplay: r.teacherDisplay || r.teacher,
+        grade: r.grade,
+        classSize: 0,
+        months: {},
+      });
+    }
+    const slot = slotMap.get(sk);
+    if ((r.classSize || 0) > slot.classSize) slot.classSize = r.classSize || 0;
+    if (!slot.months[r.month]) {
+      slot.months[r.month] = { present: 0, absent: 0, none: 0, sessions: 0 };
+    }
+    slot.months[r.month].present += present;
+    slot.months[r.month].absent += absent;
+    slot.months[r.month].none += none;
+    slot.months[r.month].sessions += 1;
+  }
+
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const groups = { improving: [], steady: [], declining: [] };
+  let insufficient = 0;
+
+  for (const slot of slotMap.values()) {
+    const points = months
+      .map(month => {
+        const m = slot.months[month];
+        if (!m || !m.sessions) return null;
+        return {
+          month,
+          present: m.present,
+          sessions: m.sessions,
+          avgPresent: m.present / m.sessions,
+          absent: m.absent,
+          none: m.none,
+        };
+      })
+      .filter(Boolean);
+    const category = classifyAttendanceTrend(points);
+    if (category === 'insufficient') {
+      insufficient += 1;
+      continue;
+    }
+    const first = points[0];
+    const last = points[points.length - 1];
+    groups[category].push({
+      ...slot,
+      points,
+      firstAvg: first.avgPresent,
+      lastAvg: last.avgPresent,
+      delta: last.avgPresent - first.avgPresent,
+      firstMonth: first.month,
+      lastMonth: last.month,
+    });
+  }
+
+  for (const key of Object.keys(groups)) {
+    groups[key].sort((a, b) =>
+      Math.abs(b.delta) - Math.abs(a.delta)
+      || (a.dayOrder - b.dayOrder)
+      || ((a.startMinutes || 0) - (b.startMinutes || 0))
+      || String(a.grade || '').localeCompare(String(b.grade || ''))
+    );
+  }
+
+  return { groups, insufficient };
+}
+
+function renderSubjectAttendanceClassTrend(records, subject, level) {
+  const { groups, insufficient } = computeSubjectAttendanceClassTrend(records, subject, level);
+  const totalClassified = groups.improving.length + groups.steady.length + groups.declining.length;
+  if (!totalClassified) {
+    return `
+      <div class="issue-summary">
+        <div class="issue-card good"><span>整体进步班</span><b>0</b></div>
+        <div class="issue-card"><span>稳定保持班</span><b>0</b></div>
+        <div class="issue-card low"><span>整体退步班</span><b>0</b></div>
+      </div>
+      <p style="color:var(--muted);font-size:12px;">目前没有足够月份可分类。每个班至少需要 3 个已点名月份。</p>`;
+  }
+
+  function sequenceLabel(slot) {
+    return slot.points
+      .map(p => `${String(p.month).split('.')[1] || p.month}:${p.avgPresent.toFixed(1)}`)
+      .join(' → ');
+  }
+
+  function avgPresentTrend(delta, prev) {
+    if (delta == null || isNaN(delta)) return '<span class="trend-flat">—</span>';
+    const pctStr = prev > 0 ? ` (${delta >= 0 ? '+' : ''}${(delta / prev * 100).toFixed(1)}%)` : '';
+    if (Math.abs(delta) < 0.05) return `<span class="trend-flat">→ 0${pctStr}</span>`;
+    if (delta > 0) return `<span class="trend-up">↑ +${delta.toFixed(1)}人${pctStr}</span>`;
+    return `<span class="trend-down">↓ ${delta.toFixed(1)}人${pctStr}</span>`;
+  }
+
+  function categoryTable(title, key, note) {
+    const list = groups[key];
+    if (!list.length) {
+      return `
+        <h4 class="issue-subtitle">${escapeHtml(title)} <span>${escapeHtml(note)}</span></h4>
+        <p style="color:var(--muted);font-size:12px;">暂无班级。</p>`;
+    }
+    const rows = list.map(slot => `
+      <tr>
+        <td>${escapeHtml(slot.grade || '-')}</td>
+        <td>${escapeHtml(slot.teacherDisplay || '-')}</td>
+        <td>${escapeHtml(slot.branch || '-')}</td>
+        <td>${escapeHtml(slot.day || '-')}</td>
+        <td>${escapeHtml(slot.timeRange || '-')}</td>
+        <td class="num">${fmtNum(slot.classSize)}</td>
+        <td class="num">${slot.firstAvg.toFixed(1)}</td>
+        <td class="num">${slot.lastAvg.toFixed(1)}</td>
+        <td class="col-trend">${avgPresentTrend(slot.delta, slot.firstAvg)}</td>
+        <td>${escapeHtml(sequenceLabel(slot))}</td>
+      </tr>`).join('');
+    return `
+      <h4 class="issue-subtitle">${escapeHtml(title)} <span>${escapeHtml(note)}</span></h4>
+      <div class="month-matrix-wrap">
+        <table class="data month-matrix issue-table">
+          <thead><tr>
+            <th>年纪</th>
+            <th>老师</th>
+            <th>分行</th>
+            <th>礼拜</th>
+            <th>时间</th>
+            <th class="num">人数</th>
+            <th class="num">首月平均P/课</th>
+            <th class="num">最近平均P/课</th>
+            <th>变化</th>
+            <th>月份走势</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  return `
+    <div class="issue-summary">
+      <div class="issue-card good"><span>整体进步班</span><b>${fmtNum(groups.improving.length)}</b></div>
+      <div class="issue-card"><span>稳定保持班</span><b>${fmtNum(groups.steady.length)}</b></div>
+      <div class="issue-card low"><span>整体退步班</span><b>${fmtNum(groups.declining.length)}</b></div>
+      <div class="issue-card unmarked"><span>资料不足</span><b>${fmtNum(insufficient)}</b></div>
+    </div>
+    ${categoryTable('整体进步班', 'improving', '平均出席人数明显上升，允许中间小幅波动')}
+    ${categoryTable('稳定保持班', 'steady', '没有明显上升/下降，或只属于正常小波动')}
+    ${categoryTable('整体退步班', 'declining', '平均出席人数明显下降，允许中间小幅波动')}
+    <div class="matrix-hint">
+      分类口径：按此科目下每个班级/时段的“每月平均每课出席人数”判断，避免 4 次课月份和 5 次课月份直接比总 P 造成误判。
+      只纳入 P+A&gt;0 的已点名课；完全未点名课不参与趋势。至少 3 个已点名月份才分类；
+      明显变化门槛为至少 1 人或约 5%，稳定保持班包含正常波动。
+    </div>`;
+}
+
 function monthCellHtml(monthData) {
   if (!monthData || (monthData.present + monthData.absent + monthData.none === 0)) {
     return `<td class="num cell-empty">—</td>`;
@@ -2878,6 +3053,9 @@ function openSubjectModal(subject, level) {
 
     <h3>每月出席人次</h3>
     <div class="subject-trend-card">${renderSubjectTrendChart(stat.monthPMap)}</div>
+
+    <h3>出席人数趋势分类</h3>
+    ${renderSubjectAttendanceClassTrend(records, subject, level)}
 
     <h3>每周实际总人数</h3>
     <div class="subject-trend-card">${renderWeekHeadChart(stat.weekHeadMap)}</div>
