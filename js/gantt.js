@@ -44,6 +44,9 @@ const state = {
   attendanceCtl: {
     axis: 'month',
     group: '',
+    matrixDimension: 'branch',
+    matrixBucket: 'month',
+    matrixMetric: 'rate',
   },
   teacherSort: { col: 'hours', dir: 'desc' },
   underperfSort: { col: 'rate', dir: 'asc' },
@@ -3095,9 +3098,462 @@ function renderAttendanceView() {
   const records = filteredRecords();
   const ctl = state.attendanceCtl;
   const buckets = computeAttendanceBuckets(records, ctl.axis, ctl.group);
+  renderAttendanceSummary(records);
   renderAttendanceLine(buckets, ctl.group);
   renderAttendanceStack(buckets, ctl.axis);
-  renderUnderperformingSlots(records);
+  renderAttendanceMatrix(records, ctl.matrixDimension, ctl.matrixBucket, ctl.matrixMetric);
+  renderAttendanceIssues(records);
+}
+
+function attendanceRateOf(present, absent, none) {
+  const total = (present || 0) + (absent || 0) + (none || 0);
+  if (((present || 0) + (absent || 0)) === 0 || total === 0) return null;
+  return (present || 0) / total;
+}
+
+function renderAttendanceSummary(records) {
+  const present = records.reduce((sum, r) => sum + (r.present || 0), 0);
+  const absent = records.reduce((sum, r) => sum + (r.absent || 0), 0);
+  const none = records.reduce((sum, r) => sum + (r.none || 0), 0);
+  const total = present + absent + none;
+  const rate = attendanceRateOf(present, absent, none);
+  const unmarkedSessions = records.filter(r =>
+    ((r.present || 0) + (r.absent || 0)) === 0 && ((r.present || 0) + (r.absent || 0) + (r.none || 0)) > 0
+  ).length;
+  const slots = deriveWeeklySlots(records);
+  const lowSlots = slots.filter(s => s.attendanceRate != null && s.attendanceRate < 0.5).length;
+  const decliningSlots = computeDecliningAttendanceSlots(records).length;
+  const fullSlots = slots.filter(s => s.status === 'full').length;
+
+  const cards = [
+    { label: '本期总人次', value: fmtNum(total) },
+    { label: '本期出席 P', value: fmtNum(present), cls: 'high' },
+    { label: '等同缺席 A+N', value: fmtNum(absent + none), cls: 'low' },
+    { label: 'A/N 拆分', value: `${fmtNum(absent)}/${fmtNum(none)}`, cls: 'unmarked' },
+    { label: '本期出勤率', value: pct(rate), cls: rate == null ? 'unmarked' : (rate >= 0.8 ? 'high' : (rate >= 0.5 ? 'mid' : 'low')) },
+    { label: '未点名课次', value: fmtNum(unmarkedSessions), cls: unmarkedSessions ? 'unmarked' : 'high' },
+    { label: '低出勤班数', value: fmtNum(lowSlots), cls: lowSlots ? 'low' : 'high' },
+    { label: '退步班数', value: fmtNum(decliningSlots), cls: decliningSlots ? 'low' : 'high' },
+    { label: '真全勤班数', value: fmtNum(fullSlots), cls: 'full' },
+  ];
+
+  $('#attendance-summary').innerHTML = cards.map(c => `
+    <div class="card ${c.cls || ''}">
+      <div class="label">${escapeHtml(c.label)}</div>
+      <div class="value">${escapeHtml(c.value)}</div>
+    </div>
+  `).join('');
+}
+
+function attendanceBucketKey(r, bucketBy) {
+  if (bucketBy === 'month') return r.month || '';
+  if (bucketBy === 'week') return weekOfRecord(r);
+  return '';
+}
+
+function attendanceBucketSort(a, b, bucketBy) {
+  if (bucketBy === 'month') return monthOrderOf(a) - monthOrderOf(b);
+  return weekOrderOf(a).localeCompare(weekOrderOf(b));
+}
+
+function attendanceDimensionValue(r, dimension) {
+  if (dimension === 'teacher') {
+    return {
+      key: r.teacher || '',
+      label: r.teacherDisplay || r.teacher || '',
+    };
+  }
+  return {
+    key: r[dimension] || '',
+    label: r[dimension] || '',
+  };
+}
+
+function attendanceDimensionLabel(dimension) {
+  return {
+    branch: '分行',
+    level: '中小',
+    subject: '科目',
+    grade: '年纪',
+    teacher: '老师',
+  }[dimension] || '维度';
+}
+
+function computeAttendanceDimensionMatrix(records, dimension, bucketBy) {
+  const rowMap = new Map();
+  const bucketSet = new Set();
+
+  for (const r of records) {
+    const dim = attendanceDimensionValue(r, dimension);
+    const bucket = attendanceBucketKey(r, bucketBy);
+    if (!dim.key || !bucket) continue;
+    bucketSet.add(bucket);
+    if (!rowMap.has(dim.key)) {
+      rowMap.set(dim.key, {
+        key: dim.key,
+        label: dim.label,
+        present: 0,
+        absent: 0,
+        none: 0,
+        sessions: 0,
+        slotKeys: new Set(),
+        buckets: {},
+      });
+    }
+    const row = rowMap.get(dim.key);
+    row.present += r.present || 0;
+    row.absent += r.absent || 0;
+    row.none += r.none || 0;
+    row.sessions += 1;
+    if (r.day && r.timeRange) row.slotKeys.add(slotKey(r));
+    if (!row.buckets[bucket]) row.buckets[bucket] = { present: 0, absent: 0, none: 0, sessions: 0 };
+    const cell = row.buckets[bucket];
+    cell.present += r.present || 0;
+    cell.absent += r.absent || 0;
+    cell.none += r.none || 0;
+    cell.sessions += 1;
+  }
+
+  const buckets = Array.from(bucketSet).sort((a, b) => attendanceBucketSort(a, b, bucketBy));
+  const rows = Array.from(rowMap.values()).map(row => {
+    row.total = row.present + row.absent + row.none;
+    row.rate = attendanceRateOf(row.present, row.absent, row.none);
+    return row;
+  }).sort((a, b) =>
+    (b.present + b.absent + b.none) - (a.present + a.absent + a.none)
+    || String(a.label).localeCompare(String(b.label))
+  );
+
+  return { rows, buckets };
+}
+
+function attendanceMatrixCellHtml(data, metric) {
+  if (!data || ((data.present || 0) + (data.absent || 0) + (data.none || 0)) === 0) {
+    return '<td class="num cell-empty">—</td>';
+  }
+  const present = data.present || 0;
+  const absent = data.absent || 0;
+  const none = data.none || 0;
+  const total = present + absent + none;
+  if ((present + absent) === 0) {
+    const display = metric === 'equivAbsent' ? fmtNum(absent + none) : '未点';
+    return `<td class="num cell-unmarked" title="未点名 N=${none}">${escapeHtml(display)}</td>`;
+  }
+  const status = statusForAttendance(present, absent, none);
+  const rate = present / total;
+  let display = pct(rate);
+  if (metric === 'count') display = `${fmtNum(present)}/${fmtNum(total)}`;
+  if (metric === 'equivAbsent') display = fmtNum(absent + none);
+  const tooltip = `P ${present}  A ${absent}  N ${none}  sessions ${data.sessions || 0}`;
+  return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
+}
+
+function attendanceRateTrendCell(row, buckets) {
+  let prev = null;
+  let last = null;
+  for (const bucket of buckets) {
+    const cell = row.buckets[bucket];
+    if (!cell) continue;
+    const rate = attendanceRateOf(cell.present, cell.absent, cell.none);
+    if (rate == null) continue;
+    if (last != null) prev = last;
+    last = rate;
+  }
+  if (prev == null || last == null) return '<td class="num trend-flat">—</td>';
+  const delta = last - prev;
+  const label = `${delta >= 0 ? '+' : ''}${Math.round(delta * 100)}%`;
+  if (Math.abs(delta) < 0.05) return `<td class="num trend-flat">→ ${escapeHtml(label)}</td>`;
+  if (delta > 0) return `<td class="num trend-up">↑ ${escapeHtml(label)}</td>`;
+  return `<td class="num trend-down">↓ ${escapeHtml(label)}</td>`;
+}
+
+function renderAttendanceMatrix(records, dimension, bucketBy, metric) {
+  const root = $('#attendance-matrix-wrap');
+  const { rows, buckets } = computeAttendanceDimensionMatrix(records, dimension, bucketBy);
+  if (!rows.length || !buckets.length) {
+    root.innerHTML = `
+      <div class="subject-section-title">维度表现矩阵 <span class="small">当前筛选范围没有可显示数据</span></div>
+      <div class="empty-msg">没有数据</div>`;
+    return;
+  }
+
+  const headers = buckets
+    .map(b => `<th class="num" title="${escapeHtml(bucketBy === 'week' ? weekFullLabel(b) : b)}">${escapeHtml(bucketLabel(b, bucketBy))}</th>`)
+    .join('');
+  const rowsHtml = rows.map(row => {
+    const cells = buckets.map(b => attendanceMatrixCellHtml(row.buckets[b], metric)).join('');
+    return `<tr>
+      <td class="col-key">${escapeHtml(row.label || row.key)}</td>
+      <td class="num">${fmtNum(row.slotKeys.size)}</td>
+      <td class="num">${fmtNum(row.sessions)}</td>
+      ${cells}
+      <td class="num"><b>${fmtNum(row.present)}</b></td>
+      <td class="num">${fmtNum(row.absent + row.none)}</td>
+      <td class="num">${pct(row.rate)}</td>
+      ${attendanceRateTrendCell(row, buckets)}
+    </tr>`;
+  }).join('');
+
+  root.innerHTML = `
+    <div class="subject-section-title">维度表现矩阵 <span class="small">${escapeHtml(attendanceDimensionLabel(dimension))} × ${bucketBy === 'month' ? '月份' : '周次'} · 单元格 = ${metric === 'rate' ? '出勤率' : metric === 'count' ? 'P/总' : 'A+N'}</span></div>
+    <div class="month-matrix-wrap">
+      <table class="data month-matrix">
+        <thead><tr>
+          <th>${escapeHtml(attendanceDimensionLabel(dimension))}</th>
+          <th class="num">班数</th>
+          <th class="num">课次</th>
+          ${headers}
+          <th class="num">总P</th>
+          <th class="num">A+N</th>
+          <th class="num">出勤率</th>
+          <th class="num">趋势</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="matrix-hint">
+      出勤率统一使用 P ÷ (P + A + N)。趋势比较最近两个有有效点名数据的${bucketBy === 'month' ? '月份' : '周次'}。
+      切换维度可以快速看出问题集中在分行、科目、年纪或老师。
+    </div>`;
+}
+
+function computeSlotIssueStats(records) {
+  const map = new Map();
+  for (const r of records) {
+    if (!r.day || !r.timeRange) continue;
+    const key = slotKey(r);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        branch: r.branch,
+        day: r.day,
+        dayOrder: r.dayOrder,
+        timeRange: r.timeRange,
+        startMinutes: r.startMinutes,
+        subject: r.subject,
+        grade: r.grade,
+        teacher: r.teacher,
+        teacherDisplay: r.teacherDisplay || r.teacher,
+        classSize: 0,
+        present: 0,
+        absent: 0,
+        none: 0,
+        sessions: 0,
+        unmarkedSessions: 0,
+        markedSessions: 0,
+        latestDate: '',
+      });
+    }
+    const slot = map.get(key);
+    const present = r.present || 0;
+    const absent = r.absent || 0;
+    const none = r.none || 0;
+    slot.present += present;
+    slot.absent += absent;
+    slot.none += none;
+    slot.sessions += 1;
+    if ((r.classSize || 0) > slot.classSize) slot.classSize = r.classSize || 0;
+    if ((present + absent) === 0 && (present + absent + none) > 0) slot.unmarkedSessions += 1;
+    if ((present + absent) > 0) slot.markedSessions += 1;
+    if (String(r.date || '') > String(slot.latestDate || '')) slot.latestDate = r.date || '';
+  }
+  return Array.from(map.values()).map(slot => {
+    slot.total = slot.present + slot.absent + slot.none;
+    slot.equivAbsent = slot.absent + slot.none;
+    slot.rate = attendanceRateOf(slot.present, slot.absent, slot.none);
+    slot.status = statusForAttendance(slot.present, slot.absent, slot.none);
+    return slot;
+  });
+}
+
+function slotIssueRows(slots, emptyText) {
+  if (!slots.length) {
+    return `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:16px;">${escapeHtml(emptyText || '没有数据')}</td></tr>`;
+  }
+  return slots.map(slot => `
+    <tr>
+      <td>${escapeHtml(slot.branch || '-')}</td>
+      <td>${escapeHtml(slot.day || '-')}</td>
+      <td>${escapeHtml(slot.timeRange || '-')}</td>
+      <td>${escapeHtml(slot.subject || '-')} ${escapeHtml(slot.grade || '')}</td>
+      <td>${escapeHtml(slot.teacherDisplay || slot.teacher || '-')}</td>
+      <td class="num">${fmtNum(slot.classSize)}</td>
+      <td class="num">${fmtNum(slot.present)}</td>
+      <td class="num cell-low">${fmtNum(slot.absent)}</td>
+      <td class="num cell-unmarked">${fmtNum(slot.none)}</td>
+      <td class="num cell-${slot.status}">${slot.rate == null ? '未点' : pct(slot.rate)}</td>
+      <td class="num">${fmtNum(slot.sessions)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderIssueTable(title, note, slots, emptyText) {
+  return `
+    <h4 class="issue-subtitle">${escapeHtml(title)} <span>${escapeHtml(note || '')}</span></h4>
+    <div class="month-matrix-wrap">
+      <table class="data month-matrix issue-table">
+        <thead><tr>
+          <th>分行</th>
+          <th>礼拜</th>
+          <th>时间</th>
+          <th>课程</th>
+          <th>老师</th>
+          <th class="num">人数</th>
+          <th class="num">P</th>
+          <th class="num">A</th>
+          <th class="num">N</th>
+          <th class="num">出勤率</th>
+          <th class="num">课次</th>
+        </tr></thead>
+        <tbody>${slotIssueRows(slots, emptyText)}</tbody>
+      </table>
+    </div>`;
+}
+
+function computeDecliningAttendanceSlots(records) {
+  const slotMap = new Map();
+  const monthSet = new Set();
+  for (const r of records) {
+    if (!r.month || !r.day || !r.timeRange) continue;
+    const key = slotKey(r);
+    monthSet.add(r.month);
+    if (!slotMap.has(key)) {
+      slotMap.set(key, {
+        key,
+        branch: r.branch,
+        day: r.day,
+        dayOrder: r.dayOrder,
+        timeRange: r.timeRange,
+        startMinutes: r.startMinutes,
+        subject: r.subject,
+        grade: r.grade,
+        teacher: r.teacher,
+        teacherDisplay: r.teacherDisplay || r.teacher,
+        classSize: 0,
+        months: {},
+      });
+    }
+    const slot = slotMap.get(key);
+    if ((r.classSize || 0) > slot.classSize) slot.classSize = r.classSize || 0;
+    addRecordToMetricBucket(ensureMetricBucket(slot.months, r.month), r);
+  }
+
+  const months = Array.from(monthSet).sort((a, b) => monthOrderOf(a) - monthOrderOf(b));
+  const declining = [];
+  for (const slot of slotMap.values()) {
+    const points = months.map(month => {
+      const m = slot.months[month];
+      if (!m) return null;
+      const rate = attendanceRateOf(m.present, m.absent, m.none);
+      if (rate == null) return null;
+      return { month, rate, present: m.present, absent: m.absent, none: m.none, sessions: m.sessions };
+    }).filter(Boolean);
+    if (points.length < 3) continue;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const delta = last.rate - first.rate;
+    const stepTolerance = 0.08;
+    const deltas = points.slice(1).map((p, i) => p.rate - points[i].rate);
+    const mostlyDown = deltas.filter(d => d <= stepTolerance).length >= deltas.length - 1;
+    if (delta <= -0.1 && mostlyDown) {
+      declining.push({
+        ...slot,
+        firstMonth: first.month,
+        lastMonth: last.month,
+        firstRate: first.rate,
+        lastRate: last.rate,
+        delta,
+        points,
+      });
+    }
+  }
+  declining.sort((a, b) => a.delta - b.delta || (a.dayOrder - b.dayOrder) || ((a.startMinutes || 0) - (b.startMinutes || 0)));
+  return declining;
+}
+
+function renderDecliningAttendanceTable(slots) {
+  if (!slots.length) {
+    return `
+      <h4 class="issue-subtitle">明显退步班级 <span>至少 3 个已点名月份</span></h4>
+      <div class="empty-msg">没有明显退步班级</div>`;
+  }
+  const rows = slots.slice(0, 20).map(slot => `
+    <tr>
+      <td>${escapeHtml(slot.branch || '-')}</td>
+      <td>${escapeHtml(slot.day || '-')}</td>
+      <td>${escapeHtml(slot.timeRange || '-')}</td>
+      <td>${escapeHtml(slot.subject || '-')} ${escapeHtml(slot.grade || '')}</td>
+      <td>${escapeHtml(slot.teacherDisplay || slot.teacher || '-')}</td>
+      <td class="num">${fmtNum(slot.classSize)}</td>
+      <td class="num">${escapeHtml(slot.firstMonth)}</td>
+      <td class="num">${pct(slot.firstRate)}</td>
+      <td class="num">${escapeHtml(slot.lastMonth)}</td>
+      <td class="num">${pct(slot.lastRate)}</td>
+      <td class="num trend-down">${Math.round(slot.delta * 100)}%</td>
+    </tr>`).join('');
+  return `
+    <h4 class="issue-subtitle">明显退步班级 <span>至少 3 个已点名月份 · 首月到最近月份下降超过 10%</span></h4>
+    <div class="month-matrix-wrap">
+      <table class="data month-matrix issue-table">
+        <thead><tr>
+          <th>分行</th>
+          <th>礼拜</th>
+          <th>时间</th>
+          <th>课程</th>
+          <th>老师</th>
+          <th class="num">人数</th>
+          <th class="num">首月</th>
+          <th class="num">首月率</th>
+          <th class="num">最近月</th>
+          <th class="num">最近率</th>
+          <th class="num">变化</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderAttendanceIssues(records) {
+  const root = $('#attendance-issues-wrap');
+  const slots = computeSlotIssueStats(records);
+  const lowAll = slots.filter(s => s.rate != null && s.rate < 0.5);
+  const unmarkedAll = slots.filter(s => s.unmarkedSessions > 0);
+  const equivAbsentAll = slots.filter(s => s.equivAbsent > 0);
+  const low = lowAll
+    .sort((a, b) => a.rate - b.rate || b.equivAbsent - a.equivAbsent)
+    .slice(0, 20);
+  const unmarked = unmarkedAll
+    .sort((a, b) => b.none - a.none || b.unmarkedSessions - a.unmarkedSessions || String(b.latestDate).localeCompare(String(a.latestDate)))
+    .slice(0, 20);
+  const equivAbsent = equivAbsentAll
+    .sort((a, b) => b.equivAbsent - a.equivAbsent || (a.rate == null ? 1 : a.rate) - (b.rate == null ? 1 : b.rate))
+    .slice(0, 20);
+  const declining = computeDecliningAttendanceSlots(records);
+
+  const issueCards = [
+    { label: '低出勤时段', value: lowAll.length, cls: 'low' },
+    { label: '未点名时段', value: unmarkedAll.length, cls: 'unmarked' },
+    { label: '有等同缺席时段', value: equivAbsentAll.length, cls: 'low' },
+    { label: '明显退步班级', value: declining.length, cls: 'low' },
+  ];
+
+  root.innerHTML = `
+    <div class="subject-section-title">问题排行 <span class="small">优先处理低出勤、未点名、A+N 最高和明显退步班级</span></div>
+    <div class="issue-summary">
+      ${issueCards.map(c => `
+        <div class="issue-card ${c.cls || ''}">
+          <span>${escapeHtml(c.label)}</span>
+          <b>${fmtNum(c.value)}</b>
+        </div>`).join('')}
+    </div>
+    ${renderIssueTable('低出勤时段 Top 20', '按出勤率由低到高', low, '没有已点名出勤数据')}
+    ${renderIssueTable('未点名最多 Top 20', '按 N 人次和未点名课次排序', unmarked, '没有未点名课次')}
+    ${renderIssueTable('等同缺席最多 Top 20', 'A + N 最高', equivAbsent, '没有等同缺席数据')}
+    ${renderDecliningAttendanceTable(declining)}
+    <div class="matrix-hint">
+      问题榜使用当前筛选范围。A 是已确认缺席，N 是未点名；两者在主口径中都计入等同缺席。
+      “明显退步班级”按每个 weekly slot 的月出勤率判断，只纳入已有点名资料的月份。
+    </div>`;
 }
 
 function computeAttendanceBuckets(records, axis, groupBy) {
@@ -3345,6 +3801,18 @@ function bindFilters() {
   });
   $('#att-group').addEventListener('change', (e) => {
     state.attendanceCtl.group = e.target.value;
+    if (state.view === 'attendance') renderAttendanceView();
+  });
+  $('#att-matrix-dim').addEventListener('change', (e) => {
+    state.attendanceCtl.matrixDimension = e.target.value;
+    if (state.view === 'attendance') renderAttendanceView();
+  });
+  $('#att-matrix-bucket').addEventListener('change', (e) => {
+    state.attendanceCtl.matrixBucket = e.target.value;
+    if (state.view === 'attendance') renderAttendanceView();
+  });
+  $('#att-matrix-metric').addEventListener('change', (e) => {
+    state.attendanceCtl.matrixMetric = e.target.value;
     if (state.view === 'attendance') renderAttendanceView();
   });
 }

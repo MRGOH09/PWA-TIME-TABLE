@@ -1039,6 +1039,7 @@
   </section>
 
   <section id="view-attendance" class="view" style="display:none">
+    <div id="attendance-summary" class="summary"></div>
     <div class="attendance-controls">
       <label>横轴
           <select id="att-axis">
@@ -1058,6 +1059,28 @@
           <option value="teacher">老师</option>
         </select>
       </label>
+      <label>矩阵维度
+        <select id="att-matrix-dim">
+          <option value="branch">分行</option>
+          <option value="level">中小</option>
+          <option value="subject">科目</option>
+          <option value="grade">年纪</option>
+          <option value="teacher">老师</option>
+        </select>
+      </label>
+      <label>矩阵周期
+        <select id="att-matrix-bucket">
+          <option value="month">按月</option>
+          <option value="week">按周</option>
+        </select>
+      </label>
+      <label>矩阵指标
+        <select id="att-matrix-metric">
+          <option value="rate">出勤率</option>
+          <option value="count">P/总</option>
+          <option value="equivAbsent">A+N</option>
+        </select>
+      </label>
     </div>
     <div class="attendance-charts">
       <div class="chart-card">
@@ -1075,24 +1098,8 @@
         </div>
       </div>
     </div>
-    <div class="underperf-wrap">
-      <h3 style="margin:0 0 8px;color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:0.04em;">表现差时段排行（出勤率最低 20）</h3>
-      <table class="data" id="underperf-table">
-        <thead>
-          <tr>
-            <th>分行</th>
-            <th>礼拜</th>
-            <th>时间</th>
-            <th>科目</th>
-            <th>年纪</th>
-            <th>老师</th>
-            <th class="num">出勤率</th>
-            <th class="num">sessions</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <div id="attendance-matrix-wrap" class="underperf-wrap"></div>
+    <div id="attendance-issues-wrap" class="underperf-wrap"></div>
   </section>
 </main>
 
