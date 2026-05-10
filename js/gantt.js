@@ -777,9 +777,9 @@ function renderTeacherAttendanceClassTrend(records, teacher, level) {
   if (!totalClassified) {
     return `
       <div class="issue-summary">
-        <div class="issue-card good"><span>持续进步班</span><b>0</b></div>
-        <div class="issue-card"><span>持续保持班</span><b>0</b></div>
-        <div class="issue-card low"><span>持续退步班</span><b>0</b></div>
+        <div class="issue-card good"><span>整体进步班</span><b>0</b></div>
+        <div class="issue-card"><span>稳定保持班</span><b>0</b></div>
+        <div class="issue-card low"><span>整体退步班</span><b>0</b></div>
       </div>
       <p style="color:var(--muted);font-size:12px;">目前没有足够月份可分类。每个班至少需要 3 个已点名月份。</p>`;
   }
@@ -839,18 +839,18 @@ function renderTeacherAttendanceClassTrend(records, teacher, level) {
 
   return `
     <div class="issue-summary">
-      <div class="issue-card good"><span>持续进步班</span><b>${fmtNum(groups.improving.length)}</b></div>
-      <div class="issue-card"><span>持续保持班</span><b>${fmtNum(groups.steady.length)}</b></div>
-      <div class="issue-card low"><span>持续退步班</span><b>${fmtNum(groups.declining.length)}</b></div>
+      <div class="issue-card good"><span>整体进步班</span><b>${fmtNum(groups.improving.length)}</b></div>
+      <div class="issue-card"><span>稳定保持班</span><b>${fmtNum(groups.steady.length)}</b></div>
+      <div class="issue-card low"><span>整体退步班</span><b>${fmtNum(groups.declining.length)}</b></div>
       <div class="issue-card unmarked"><span>资料不足</span><b>${fmtNum(insufficient)}</b></div>
     </div>
-    ${categoryTable('持续进步班', 'improving', '平均出席人数明显上升，且月份走势大致不回落')}
-    ${categoryTable('持续保持班', 'steady', '没有明显上升/下降，或只属于正常小波动')}
-    ${categoryTable('持续退步班', 'declining', '平均出席人数明显下降，且月份走势大致不反弹')}
+    ${categoryTable('整体进步班', 'improving', '平均出席人数明显上升，允许中间小幅波动')}
+    ${categoryTable('稳定保持班', 'steady', '没有明显上升/下降，或只属于正常小波动')}
+    ${categoryTable('整体退步班', 'declining', '平均出席人数明显下降，允许中间小幅波动')}
     <div class="matrix-hint">
       分类口径：按每班“每月平均每课出席人数”判断，避免 4 次课月份和 5 次课月份直接比总 P 造成误判。
       只纳入 P+A&gt;0 的已点名课；完全未点名课不参与趋势。至少 3 个已点名月份才分类；
-      明显变化门槛为至少 1 人或约 5%，持续保持班包含正常波动。
+      明显变化门槛为至少 1 人或约 5%，稳定保持班包含正常波动。
     </div>`;
 }
 
