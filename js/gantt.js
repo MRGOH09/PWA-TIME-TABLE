@@ -596,12 +596,23 @@ function weekHeadCellHtml(weekData) {
   return `<td class="num cell-${status}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</td>`;
 }
 
-function classCountCellHtml(data) {
+function contributionLevel(value, maxValue) {
+  if (!maxValue || value <= 0) return 'contrib-empty';
+  const ratio = value / maxValue;
+  if (ratio >= 0.75) return 'contrib-strong';
+  if (ratio >= 0.5) return 'contrib-high';
+  if (ratio >= 0.25) return 'contrib-mid';
+  return 'contrib-low';
+}
+
+function classCountCellHtml(data, maxValue) {
   if (!data || !data.effectiveSessions) {
     return `<td class="num cell-empty">—</td>`;
   }
+  const value = data.effectiveHead || 0;
+  const level = contributionLevel(value, maxValue);
   const tooltip = [
-    `有效科数 ${fmtNum(data.effectiveHead || 0)}`,
+    `有效科数 ${fmtNum(value)}`,
     `有效课次 ${data.effectiveSessions || 0}`,
     `未纳入未点名课次 ${data.unmarkedSessions || 0}`,
     `全部课 ${data.sessions || 0}`,
@@ -609,7 +620,12 @@ function classCountCellHtml(data) {
     `A ${data.absent || 0}`,
     `N ${data.none || 0}`,
   ].join('  ');
-  return `<td class="num" title="${escapeHtml(tooltip)}">${fmtNum(data.effectiveHead || 0)}</td>`;
+  return `<td class="num cell-contrib ${level}" title="${escapeHtml(tooltip)}">${fmtNum(value)}</td>`;
+}
+
+function contributionTotalCellHtml(value, maxValue) {
+  const level = contributionLevel(value, maxValue);
+  return `<td class="num cell-contrib ${level}"><b>${fmtNum(value)}</b></td>`;
 }
 
 function computeTeacherClassContributions(records, teacher, level) {
@@ -1854,15 +1870,24 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
     })
     .join('');
 
-  const rows = slots.map(slot => {
+  let maxCellValue = 0;
+  let maxTotalValue = 0;
+  const rowData = slots.map(slot => {
     const bucketMap = bucketBy === 'month' ? slot.months : slot.weeks;
-    const cells = buckets.map(b => classCountCellHtml(bucketMap[b])).join('');
     let effectiveTotal = 0;
     for (const b of buckets) {
       const data = bucketMap[b];
       if (!data) continue;
-      effectiveTotal += data.effectiveHead || 0;
+      const value = data.effectiveHead || 0;
+      effectiveTotal += value;
+      if (value > maxCellValue) maxCellValue = value;
     }
+    if (effectiveTotal > maxTotalValue) maxTotalValue = effectiveTotal;
+    return { slot, bucketMap, effectiveTotal };
+  });
+
+  const rows = rowData.map(({ slot, bucketMap, effectiveTotal }) => {
+    const cells = buckets.map(b => classCountCellHtml(bucketMap[b], maxCellValue)).join('');
     return `<tr>
       <td>${escapeHtml(slot.day)}</td>
       <td>${escapeHtml(slot.timeRange)}</td>
@@ -1870,7 +1895,7 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
       <td>${escapeHtml(slot.branch || '-')}</td>
       <td class="num">${fmtNum(slot.classSize)}</td>
       ${cells}
-      <td class="num"><b>${fmtNum(effectiveTotal)}</b></td>
+      ${contributionTotalCellHtml(effectiveTotal, maxTotalValue)}
     </tr>`;
   }).join('');
 
@@ -1887,7 +1912,7 @@ function renderTeacherClassContributionTable(records, teacher, level, bucketBy) 
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-  <div class="matrix-hint">${label} = 班级人数 × 有效课次，即每一班贡献的人次科数；未点名课不纳入正式科数。</div>`;
+  <div class="matrix-hint">${label} = 班级人数 × 有效课次，即每一班贡献的人次科数；未点名课不纳入正式科数。颜色越深代表该表内科数贡献越高。</div>`;
 }
 
 function renderTeacherAbsenceUnmarkedSection(records, teacher, level) {
