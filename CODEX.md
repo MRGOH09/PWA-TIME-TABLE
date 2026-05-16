@@ -1376,7 +1376,7 @@ renderAttendanceView(filtered)
 
 These are explicitly out of scope for V1 but worth noting:
 
-* PIN gate or Lark OAuth before public sharing
+* PIN gate before public sharing
 * Exporting attendance reports (CSV / PDF)
 * Per-teacher attendance threshold alerts
 * Branch-level KPIs comparing month-over-month
@@ -1581,73 +1581,43 @@ V1 is considered ready for internal staff review when:
 * a known busy teacher's modal matches manual Lark Base spot checks, and
 * mobile layout is readable enough for basic review.
 
-## Auth Update — 2026-05-08
+## Auth Removal — 2026-05-16
 
-Lark OAuth is being built on branch `codex/lark-oauth` for learning and
-review before merging to `main`.
+Lark OAuth dashboard login has been removed. The app is public at the Vercel
+URL and `/api/schedule` reads Lark Base directly through the server-side
+tenant access token flow.
 
-Implemented auth routes:
+Removed auth surface:
 
-* `/api/auth_login` redirects the browser to Lark login and stores a short
-  OAuth state cookie.
-* `/api/auth_callback` receives Lark's `code`, validates `state`, exchanges
-  the code for a `user_access_token`, reads Lark user info, checks the
-  optional whitelist, then writes the signed dashboard session cookie.
-* `/api/auth_me` reports the current login state to the frontend.
-* `/api/auth_identity` shows a human-readable login identity page with
-  recommended whitelist environment variable text.
-* `/api/auth_logout` clears the signed dashboard session cookie.
+* `/api/auth_login`
+* `/api/auth_callback`
+* `/api/auth_me`
+* `/api/auth_identity`
+* `/api/auth_logout`
+* `/api/auth_dev_login`
+* signed dashboard session cookies
+* Lark permission-table writes for login approval
 
-Required Lark / Vercel setup:
+Auth-related environment variables are no longer used by the dashboard:
 
-* Lark Redirect URL:
-  `https://pwa-time-table.vercel.app/api/auth_callback`
-* Vercel environment variables before enforcing login:
-  * `AUTH_REQUIRED=true`
-  * `AUTH_COOKIE_SECRET=<long random secret>`
-  * `AUTH_REDIRECT_URL=https://pwa-time-table.vercel.app/api/auth_callback`
-  * `ALLOWED_LARK_OPEN_IDS=<comma-separated allowed open_id/union_id/user_id>`
-    or `ALLOWED_EMAILS=<comma-separated allowed emails>`
-* Optional env vars:
-  * `AUTH_SUCCESS_URL=https://pwa-time-table.vercel.app/`
-  * `LARK_AUTH_BASE_TOKEN=<permission Base token if different from schedule Base>`
-  * `LARK_AUTH_TABLE_ID=<Lark Base permission table id>`
-  * `LARK_OAUTH_SCOPE=<only if Lark asks for explicit login scopes>`
-  * `LARK_OAUTH_AUTHORIZE_URL=<only if Lark changes the authorize URL>`
+* `AUTH_REQUIRED`
+* `AUTH_COOKIE_SECRET`
+* `AUTH_REDIRECT_URL`
+* `AUTH_SUCCESS_URL`
+* `ALLOWED_LARK_OPEN_IDS`
+* `ALLOWED_EMAILS`
+* `LARK_AUTH_BASE_TOKEN`
+* `LARK_AUTH_TABLE_ID`
+* `LARK_OAUTH_SCOPE`
+* `LARK_OAUTH_AUTHORIZE_URL`
 
-Lark Base permission table mode:
+Keep the existing Lark Base read-only environment variables. They are still
+required for `/api/schedule`:
 
-* If `LARK_AUTH_TABLE_ID` is set, `/api/auth_callback` uses that table as
-  the dashboard whitelist.
-* If the permission table is in a different Lark Base from the schedule
-  table, also set `LARK_AUTH_BASE_TOKEN`.
-* Current permission table from the user-provided URL:
-  * `LARK_AUTH_BASE_TOKEN=Uc7tbsZn0aKoWAsCCa5jU4eopgC`
-  * `LARK_AUTH_TABLE_ID=tblXf3cEvRhdvGVf`
-* Required fields in that table:
-  * `Text` (Lark primary text field)
-  * `姓名`
-  * `Open ID`
-  * `Union ID`
-  * `User ID`
-  * `Email`
-  * `可以进入`
-  * `状态`
-  * `最后登录`
-  * `备注`
-* A first-time login that is not in the permission table creates a pending
-  row automatically with `可以进入 = No` and `状态 = 待批准`.
-* Admin approval happens inside Lark Base by changing `可以进入` to `Yes`.
-  The next login then receives the dashboard session cookie.
-* Vercel env whitelists (`ALLOWED_LARK_OPEN_IDS` / `ALLOWED_EMAILS`) still
-  act as a bootstrap bypass for admins.
-
-Testing rule:
-
-* First deploy this branch with `AUTH_REQUIRED=false` or no whitelist to
-  confirm Lark returns the expected user identity.
-* After confirming the user's `open_id` / email through `/api/auth_me`, add
-  the whitelist and only then set `AUTH_REQUIRED=true`.
+* `LARK_APP_ID`
+* `LARK_APP_SECRET`
+* `LARK_BASE_TOKEN`
+* `LARK_TABLE_ID`
 
 ## Pending
 
@@ -1660,7 +1630,7 @@ Testing rule:
 * Mobile polish — basic responsive tweaks done, full mobile pass
   not yet validated
 * Auth: V1 is fully public via the Vercel URL; revisit before
-  sharing externally (PIN gate or Lark OAuth)
+  sharing externally (for example, a PIN gate)
 
 ## Next Steps
 

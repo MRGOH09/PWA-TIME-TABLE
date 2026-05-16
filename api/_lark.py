@@ -88,30 +88,6 @@ def fetch_all_records(token, env, table_id=None):
     return out
 
 
-def create_record(token, env, table_id, fields):
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json; charset=utf-8",
-    }
-    resp = requests.post(
-        records_url(env, table_id=table_id),
-        headers=headers,
-        json={"fields": fields},
-        timeout=20,
-    )
-    try:
-        data = resp.json()
-    except ValueError:
-        data = {}
-    if resp.status_code >= 400:
-        detail = data.get("msg") or data.get("message") or resp.text[:300]
-        code = data.get("code", resp.status_code)
-        raise RuntimeError(f"Lark create record HTTP {resp.status_code}: {code} {detail}")
-    if data.get("code") != 0:
-        raise RuntimeError(f"Lark create record error: {data.get('msg', 'unknown')}")
-    return ((data.get("data") or {}).get("record") or {})
-
-
 def extract_text(value):
     if value is None:
         return ""
