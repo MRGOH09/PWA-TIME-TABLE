@@ -1376,7 +1376,7 @@ renderAttendanceView(filtered)
 
 These are explicitly out of scope for V1 but worth noting:
 
-* PIN gate before public sharing
+* Stronger SSO before wider external sharing
 * Exporting attendance reports (CSV / PDF)
 * Per-teacher attendance threshold alerts
 * Branch-level KPIs comparing month-over-month
@@ -1581,22 +1581,33 @@ V1 is considered ready for internal staff review when:
 * a known busy teacher's modal matches manual Lark Base spot checks, and
 * mobile layout is readable enough for basic review.
 
-## Auth Removal — 2026-05-16
+## System Auth — 2026-05-16
 
-Lark OAuth dashboard login has been removed. The app is public at the Vercel
-URL and `/api/schedule` reads Lark Base directly through the server-side
-tenant access token flow.
+Lark OAuth dashboard login has been removed. The dashboard now uses a simple
+system username/password gate backed by Vercel environment variables.
 
-Removed auth surface:
+Implemented auth routes:
 
 * `/api/auth_login`
-* `/api/auth_callback`
 * `/api/auth_me`
-* `/api/auth_identity`
 * `/api/auth_logout`
-* `/api/auth_dev_login`
-* signed dashboard session cookies
-* Lark permission-table writes for login approval
+
+`/` and `/index.html` redirect to `/api/auth_login` when system auth is
+configured and the browser has no valid session cookie. `/api/schedule` also
+returns `401 Unauthorized` without a valid session cookie, so the data API is
+not open when the dashboard is protected. When system auth is configured,
+`/api/schedule` uses `Cache-Control: private, no-store` instead of shared CDN
+cache.
+
+Required auth environment variables:
+
+* `SYSTEM_USERNAME`
+* `SYSTEM_PASSWORD`
+
+Optional auth environment variable:
+
+* `SYSTEM_AUTH_SECRET` — separate signing secret for dashboard session cookies.
+  If omitted, the system password signs the cookie.
 
 Auth-related environment variables are no longer used by the dashboard:
 
@@ -1610,6 +1621,9 @@ Auth-related environment variables are no longer used by the dashboard:
 * `LARK_AUTH_TABLE_ID`
 * `LARK_OAUTH_SCOPE`
 * `LARK_OAUTH_AUTHORIZE_URL`
+
+Do not commit actual system credentials. Put the username and password values
+directly in Vercel Environment Variables.
 
 Keep the existing Lark Base read-only environment variables. They are still
 required for `/api/schedule`:
@@ -1629,8 +1643,8 @@ required for `/api/schedule`:
   no direction chosen yet (Apple Calendar / Linear / iOS / 商务 etc.)
 * Mobile polish — basic responsive tweaks done, full mobile pass
   not yet validated
-* Auth: V1 is fully public via the Vercel URL; revisit before
-  sharing externally (for example, a PIN gate)
+* Auth: V1 uses a simple system username/password gate; revisit before
+  wider external sharing if stronger SSO is needed
 
 ## Next Steps
 

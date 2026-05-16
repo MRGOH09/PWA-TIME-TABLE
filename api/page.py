@@ -1,9 +1,21 @@
 from http.server import BaseHTTPRequestHandler
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _system_auth import auth_required, current_user, send_redirect
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        try:
+            if auth_required() and not current_user(self):
+                send_redirect(self, "/api/auth_login")
+                return
+        except Exception as exc:
+            self.send_error(500, str(exc))
+            return
+
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         index_path = os.path.join(root, "index.html")
         with open(index_path, "rb") as fh:

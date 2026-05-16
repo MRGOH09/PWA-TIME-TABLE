@@ -937,6 +937,10 @@ async function loadSchedule(opts) {
     // No ?t= cache-bust — we want CDN edge cache to work.
     const resp = await fetch('/api/schedule');
     const data = await resp.json();
+    if (resp.status === 401) {
+      location.replace('/api/auth_login');
+      return;
+    }
     if (!data || !data.success) {
       throw new Error(data && data.error ? data.error : '未知错误');
     }
@@ -950,6 +954,55 @@ async function loadSchedule(opts) {
     }
     $('#meta').textContent = '无法读取 Lark Base 数据：' + (err.message || err);
     $('#meta').style.color = 'var(--status-low)';
+  }
+}
+
+async function loadAuthState({ redirectIfNeeded = false } = {}) {
+  const node = $('#auth-status');
+  try {
+    const resp = await fetch('/api/auth_me');
+    const data = await resp.json();
+    if (!data || !data.success) throw new Error('auth check failed');
+    if (!data.authRequired) {
+      if (node) node.style.display = 'none';
+      return true;
+    }
+    if (data.authenticated) {
+      const username = (data.user && data.user.username) || '已登录';
+      if (node) {
+        node.style.display = '';
+        node.className = 'auth-chip ok';
+        node.innerHTML = `${escapeHtml(username)} <button type="button" id="auth-logout">登出</button>`;
+        $('#auth-logout').addEventListener('click', async () => {
+          await fetch('/api/auth_logout', { method: 'POST' });
+          location.href = '/api/auth_login';
+        });
+      }
+      return true;
+    }
+    if (redirectIfNeeded) {
+      location.replace('/api/auth_login');
+      return false;
+    }
+    if (node) {
+      node.style.display = '';
+      node.className = 'auth-chip warn';
+      node.innerHTML = '未登录 <button type="button" id="auth-login">登录</button>';
+      $('#auth-login').addEventListener('click', () => {
+        location.href = '/api/auth_login';
+      });
+    }
+    return false;
+  } catch (err) {
+    if (node) {
+      node.style.display = '';
+      node.className = 'auth-chip warn';
+      node.textContent = '登录状态未知';
+    }
+    if (redirectIfNeeded) {
+      location.replace('/api/auth_login');
+    }
+    return false;
   }
 }
 
@@ -3922,6 +3975,8 @@ async function init() {
   bindFilters();
   bindModalDismiss();
   bindExportPDF();
+  const canLoadDashboard = await loadAuthState({ redirectIfNeeded: true });
+  if (!canLoadDashboard) return;
   loadSchedule({ useCache: true });
   startAutoRefresh();
 }
