@@ -3990,6 +3990,61 @@ function setPrintTitle(parts) {
   return previous;
 }
 
+function printWithDeferredCleanup(cleanup) {
+  let cleaned = false;
+  let fallbackTimer = null;
+  const printMedia = window.matchMedia ? window.matchMedia('print') : null;
+
+  function removePrintMediaListener() {
+    if (!printMedia) return;
+    if (printMedia.removeEventListener) {
+      printMedia.removeEventListener('change', onPrintMediaChange);
+    } else if (printMedia.removeListener) {
+      printMedia.removeListener(onPrintMediaChange);
+    }
+  }
+
+  function cleanupOnce() {
+    if (cleaned) return;
+    cleaned = true;
+    window.removeEventListener('afterprint', cleanupOnce);
+    window.removeEventListener('focus', onFocusAfterPrint);
+    removePrintMediaListener();
+    if (fallbackTimer) clearTimeout(fallbackTimer);
+    cleanup();
+  }
+
+  function onPrintMediaChange(event) {
+    if (!event.matches) cleanupOnce();
+  }
+
+  function onFocusAfterPrint() {
+    setTimeout(() => {
+      if (!printMedia || !printMedia.matches) cleanupOnce();
+    }, 800);
+  }
+
+  window.addEventListener('afterprint', cleanupOnce);
+  window.addEventListener('focus', onFocusAfterPrint);
+  if (printMedia) {
+    if (printMedia.addEventListener) {
+      printMedia.addEventListener('change', onPrintMediaChange);
+    } else if (printMedia.addListener) {
+      printMedia.addListener(onPrintMediaChange);
+    }
+  }
+
+  setTimeout(() => {
+    fallbackTimer = setTimeout(cleanupOnce, 120000);
+    try {
+      window.print();
+    } catch (err) {
+      cleanupOnce();
+      throw err;
+    }
+  }, 50);
+}
+
 function bindExportPDF() {
   const btn = $('#export-pdf-btn');
   if (!btn) return;
@@ -4019,13 +4074,12 @@ function bindExportPDF() {
         viewLabel(state.view),
         nowTimestampStr(),
       ]);
-      window.print();
-      setTimeout(() => {
+      printWithDeferredCleanup(() => {
         document.title = previousTitle;
         $$('.view').forEach(node => node.classList.remove('print-active'));
         document.body.classList.remove('print-hide-top-summary');
         if (header && header.parentNode) header.parentNode.removeChild(header);
-      }, 200);
+      });
     }, 50);
   });
 }
@@ -4087,7 +4141,9 @@ function exportModalPDF() {
   const modalContent = $('#modal-content');
   if (!modalContent) {
     document.body.classList.add('print-modal-only');
-    setTimeout(() => window.print(), 50);
+    printWithDeferredCleanup(() => {
+      document.body.classList.remove('print-modal-only');
+    });
     return;
   }
   const h2 = modalContent.querySelector('h2');
@@ -4106,12 +4162,11 @@ function exportModalPDF() {
       entityTitle,
       nowTimestampStr(),
     ]);
-    window.print();
-    setTimeout(() => {
+    printWithDeferredCleanup(() => {
       document.title = previousTitle;
       document.body.classList.remove('print-modal-only');
       if (header && header.parentNode) header.parentNode.removeChild(header);
-    }, 200);
+    });
   }, 50);
 }
 
