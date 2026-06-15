@@ -7,11 +7,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lark import (
     get_env,
     get_tenant_access_token,
-    fetch_all_records,
-    normalize_record,
     send_json,
 )
-from _access import filter_records_for_profile, load_access_profile, public_access_summary
+from _access import filter_records_for_profile, load_access_profile_from_profiles, public_access_summary
+from _data import get_access_profiles, get_schedule_records
 from _system_auth import auth_mode, auth_required, current_user
 
 
@@ -24,12 +23,20 @@ class handler(BaseHTTPRequestHandler):
                 send_json(self, 401, {"success": False, "error": "Unauthorized"})
                 return
             env = get_env()
-            token = get_tenant_access_token(env["LARK_APP_ID"], env["LARK_APP_SECRET"])
-            raw = fetch_all_records(token, env)
-            records = [normalize_record(it) for it in raw]
+            token = None
+
+            def get_token():
+                nonlocal token
+                if not token:
+                    token = get_tenant_access_token(env["LARK_APP_ID"], env["LARK_APP_SECRET"])
+                return token
+
+            records, schedule_cache = get_schedule_records(get_token, env)
             access = None
+            permission_cache = None
             if auth_mode() == "google":
-                profile = load_access_profile(user, token, env)
+                profiles, permission_cache = get_access_profiles(get_token, env)
+                profile = load_access_profile_from_profiles(user, profiles)
                 if not profile:
                     send_json(self, 403, {
                         "success": False,
@@ -46,9 +53,13 @@ class handler(BaseHTTPRequestHandler):
             )
             send_json(self, 200, {
                 "success": True,
-                "updatedAt": datetime.now(tz).isoformat(timespec="seconds"),
+                "updatedAt": schedule_cache.get("fetchedAt") or datetime.now(tz).isoformat(timespec="seconds"),
                 "count": len(records),
                 "access": access,
+                "cache": {
+                    "schedule": schedule_cache,
+                    "permissions": permission_cache,
+                },
                 "records": records,
             }, cache_control=cache_control)
         except Exception as exc:

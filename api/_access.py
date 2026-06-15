@@ -66,11 +66,11 @@ def _profile_from_record(item):
         "fullName": full_name,
         "larkAccount": lark_account,
         "permission": permission,
-        "matchTokens": match_tokens,
+        "matchTokens": sorted(match_tokens),
     }
 
 
-def _permission_env(env):
+def permission_env(env):
     table_id = os.environ.get("LARK_PERMISSION_TABLE_ID", "").strip()
     if not table_id:
         raise RuntimeError("Missing LARK_PERMISSION_TABLE_ID")
@@ -82,23 +82,30 @@ def _permission_env(env):
     return permission_env
 
 
-def load_access_profile(user, token, env):
+def build_access_profiles(records):
+    return [_profile_from_record(item) for item in records]
+
+
+def load_access_profile_from_profiles(user, profiles):
     email = _norm((user or {}).get("email"))
     if not email:
         return None
-    raw = fetch_all_records(token, _permission_env(env))
-    for item in raw:
-        profile = _profile_from_record(item)
+    for profile in profiles or []:
         if email in profile["emails"]:
             return profile
     return None
+
+
+def load_access_profile(user, token, env):
+    raw = fetch_all_records(token, permission_env(env))
+    return load_access_profile_from_profiles(user, build_access_profiles(raw))
 
 
 def record_matches_profile(record, profile):
     tokens = set()
     for key in ("teacher", "teacherDisplay", "teacherLookup"):
         tokens.update(_name_tokens(record.get(key)))
-    return bool(tokens & (profile.get("matchTokens") or set()))
+    return bool(tokens & set(profile.get("matchTokens") or []))
 
 
 def filter_records_for_profile(records, profile):

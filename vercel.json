@@ -3,6 +3,13 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": ".",
+  "functions": {
+    "api/schedule.py": { "maxDuration": 60 },
+    "api/refresh_cache.py": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/refresh_cache", "schedule": "*/5 * * * *" }
+  ],
   "routes": [
     { "src": "^/$", "dest": "/api/page.py" },
     { "src": "^/index\\.html$", "dest": "/api/page.py" },

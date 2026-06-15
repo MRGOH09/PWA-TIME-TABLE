@@ -1648,6 +1648,45 @@ required for `/api/schedule`:
 * `LARK_BASE_TOKEN`
 * `LARK_TABLE_ID`
 
+## Redis Cache + Cron Refresh — 2026-06-15
+
+The deployed dashboard can use the Vercel Marketplace Upstash Redis
+integration to reduce direct Lark API calls.
+
+Redis environment variables are auto-injected by the integration:
+
+* `KV_REST_API_URL`
+* `KV_REST_API_TOKEN`
+* `KV_REST_API_READ_ONLY_TOKEN`
+* `KV_URL`
+* `REDIS_URL`
+
+The Python backend uses `KV_REST_API_URL` and `KV_REST_API_TOKEN` through
+the Upstash REST API. Do not expose these variables to the frontend.
+
+Cache behavior:
+
+* `/api/schedule` reads cached normalized schedule records first.
+* When Google auth is active, permission lookup uses cached minimal access
+  profiles derived from `全员详情`; it does not cache unrelated personal fields.
+* Permission filtering still happens in `/api/schedule` on every request.
+* If Redis is unavailable, the code falls back to per-instance memory cache.
+* If refresh fails but a stale Redis or memory snapshot is still available,
+  the API serves the stale snapshot instead of returning a blank dashboard.
+
+Optional cache tuning variables:
+
+* `SCHEDULE_CACHE_TTL_SECONDS` — fresh cache window, default `300`.
+* `SCHEDULE_CACHE_STALE_SECONDS` — stale fallback window, default `86400`.
+* `SCHEDULE_CACHE_NAMESPACE` — Redis key namespace, default `pwa-time-table`.
+
+Cron refresh:
+
+* `vercel.json` registers `/api/refresh_cache` every 5 minutes.
+* The endpoint requires `CRON_SECRET` and compares it to the
+  `Authorization: Bearer ...` header sent by Vercel Cron.
+* `CRON_SECRET` must be set in Vercel Production env and must not be committed.
+
 ## Pending
 
 * Vercel deployment — confirm env vars are configured and the app
