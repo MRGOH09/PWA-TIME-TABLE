@@ -4,8 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#0f172a" />
+<meta name="color-scheme" content="dark" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="补习课表" />
 <title>周补习时间表 Dashboard</title>
+<link rel="icon" href="/icons/icon-192.png" type="image/png" />
 <link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700&display=swap">
@@ -54,6 +60,7 @@
   header.top {
     padding: 16px 20px 8px;
     border-bottom: 1px solid var(--border);
+    background: var(--bg);
   }
   header.top h1 { margin: 0; font-size: 20px; }
   header.top p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
@@ -72,6 +79,19 @@
     padding: 8px 14px;
     font-size: 13px;
     font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #install-pwa-btn {
+    display: none;
+    background: var(--accent);
+    color: #0b1220;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
@@ -246,6 +266,85 @@
     grid-template-columns: var(--label-col-w) 1fr;
   }
   .gantt.solo { border-radius: 10px; }
+
+  .mobile-schedule-list {
+    display: none;
+  }
+  .mobile-day-block {
+    margin-top: 10px;
+  }
+  .mobile-day-heading {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 2px 6px;
+  }
+  .mobile-slot-card {
+    appearance: none;
+    font: inherit;
+    width: 100%;
+    text-align: left;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left-width: 5px;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(2,6,23,0.16);
+  }
+  .mobile-slot-card:active {
+    transform: scale(0.99);
+  }
+  .mobile-slot-card.full { border-left-color: var(--status-full); }
+  .mobile-slot-card.high { border-left-color: var(--status-high); }
+  .mobile-slot-card.mid { border-left-color: var(--status-mid); }
+  .mobile-slot-card.low { border-left-color: var(--status-low); }
+  .mobile-slot-card.unmarked { border-left-color: var(--status-unmarked); }
+  .mobile-slot-card .slot-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .mobile-slot-card .slot-time {
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .mobile-slot-card .slot-rate {
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .mobile-slot-card .slot-main {
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1.25;
+    margin-top: 8px;
+  }
+  .mobile-slot-card .slot-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .mobile-slot-card .slot-meta span {
+    background: rgba(148,163,184,0.12);
+    border: 1px solid rgba(148,163,184,0.18);
+    border-radius: 999px;
+    padding: 2px 7px;
+  }
 
   .gantt-labels {
     border-right: 1px solid var(--border);
@@ -528,6 +627,12 @@
     color: #0b1220;
     border-color: var(--accent);
     font-weight: 700;
+  }
+
+  .filters select,
+  .filters input[type="search"],
+  button {
+    touch-action: manipulation;
   }
 
   .pill {
@@ -941,10 +1046,178 @@
       --minute-w: 1.2px;
       --row-h: 64px;
     }
-    .filters { padding: 10px 12px; }
-    .summary { padding: 10px 12px; }
+    body {
+      padding-bottom: calc(70px + env(safe-area-inset-bottom));
+    }
+    header.top {
+      padding: calc(12px + env(safe-area-inset-top)) 12px 10px;
+    }
+    header.top h1 { font-size: 18px; }
+    header.top p { display: none; }
+    header.top .top-row {
+      flex-direction: column;
+      gap: 10px;
+    }
+    .top-actions {
+      width: 100%;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .auth-chip,
+    #export-pdf-btn,
+    #install-pwa-btn {
+      min-height: 38px;
+      padding: 9px 12px;
+      font-size: 12px;
+    }
+    .tabs {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 40;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0;
+      padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--border);
+      border-bottom: 0;
+      box-shadow: 0 -12px 30px rgba(2,6,23,0.34);
+      overflow: visible;
+    }
+    .tabs button {
+      min-width: 0;
+      padding: 9px 4px;
+      border: 0;
+      border-radius: 8px;
+      font-size: 11px;
+      line-height: 1.2;
+      white-space: normal;
+    }
+    .tabs button.active {
+      color: #0b1220;
+      background: var(--accent);
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px 12px;
+      align-items: stretch;
+    }
+    .filters label {
+      min-width: 0;
+    }
+    .filters select,
+    .filters input[type="search"] {
+      width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      font-size: 14px;
+    }
+    .filters .spacer {
+      display: none;
+    }
+    .filters button {
+      grid-column: 1 / -1;
+      min-height: 40px;
+    }
+    .summary {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      padding: 10px 12px;
+    }
+    .summary .card {
+      padding: 8px 10px;
+    }
+    .summary .card .value {
+      font-size: 18px;
+      overflow-wrap: anywhere;
+    }
+    .legend {
+      padding: 0 12px 10px;
+      gap: 8px;
+      font-size: 11px;
+    }
     .gantt-wrapper { padding: 0 8px 20px; }
+    .branch-block { margin-bottom: 12px; }
+    .branch-title {
+      border-radius: 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    .gantt {
+      display: none;
+    }
+    .mobile-schedule-list {
+      display: block;
+    }
     .bar .l3 { display: none; }
+    .teacher-table-wrap,
+    .heatmap-wrap,
+    .underperf-wrap {
+      padding: 0 8px 18px;
+    }
+    .subject-section-title {
+      margin-left: 8px;
+      padding-right: 8px;
+    }
+    table.data,
+    table.month-matrix {
+      min-width: 720px;
+      font-size: 12px;
+    }
+    table.data th,
+    table.data td,
+    table.month-matrix th,
+    table.month-matrix td {
+      padding: 7px 8px;
+    }
+    .attendance-controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px 12px;
+    }
+    .attendance-controls label,
+    .attendance-controls select {
+      width: 100%;
+      min-width: 0;
+    }
+    .attendance-charts {
+      padding: 0 8px 12px;
+      gap: 10px;
+    }
+    .chart-card {
+      padding: 10px;
+    }
+    .chart-svg {
+      height: 200px;
+    }
+    .modal-backdrop {
+      align-items: flex-end;
+      padding: 8px 8px 0;
+    }
+    .modal {
+      max-height: 92dvh;
+      border-radius: 14px 14px 0 0;
+      padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+    }
+    .modal.wide {
+      max-width: 100%;
+    }
+    .modal dl {
+      grid-template-columns: 86px 1fr;
+    }
+    .modal .actions {
+      position: sticky;
+      bottom: 0;
+      background: linear-gradient(to top, var(--panel) 70%, rgba(30,41,59,0));
+      padding-top: 12px;
+    }
   }
 </style>
 </head>
@@ -959,7 +1232,8 @@
     </div>
     <div class="top-actions">
       <div id="auth-status" class="auth-chip">检查登录…</div>
-      <button id="export-pdf-btn" type="button" title="把当前 view 打印 / 另存为 PDF">📄 导出 PDF</button>
+      <button id="install-pwa-btn" type="button">安装</button>
+      <button id="export-pdf-btn" type="button" title="把当前 view 打印 / 另存为 PDF">导出 PDF</button>
     </div>
   </div>
 </header>
@@ -1107,7 +1381,7 @@
   <div class="modal" id="modal-content"></div>
 </div>
 
-<script src="/js/gantt.js?v=2"></script>
+<script src="/js/gantt.js?v=3"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

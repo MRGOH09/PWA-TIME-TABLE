@@ -53,6 +53,7 @@ const state = {
   modalOpen: false,
   lastDataHash: '',
   authUser: null,
+  installPromptEvent: null,
 };
 
 // ===================================================================
@@ -1221,8 +1222,8 @@ function renderGantt() {
   const html = branchNames.map(branch => renderBranchBlock(branch, branchMap.get(branch), branchNames.length === 1)).join('');
   root.innerHTML = html;
 
-  // Bind clicks on bars
-  root.querySelectorAll('.bar').forEach(node => {
+  // Bind clicks on bars / mobile cards
+  root.querySelectorAll('.bar, .mobile-slot-card').forEach(node => {
     node.addEventListener('click', () => {
       const key = node.getAttribute('data-key');
       const slot = slots.find(s => s.key === key);
@@ -1271,7 +1272,53 @@ function renderBranchBlock(branch, slots, soloBranch) {
         <div class="gantt-labels">${labelsCol}</div>
         ${timeline}
       </div>
+      ${renderMobileBranchList(slots)}
     </div>
+  `;
+}
+
+function renderMobileBranchList(slots) {
+  const dayMap = new Map();
+  for (const slot of slots) {
+    if (!dayMap.has(slot.day)) dayMap.set(slot.day, []);
+    dayMap.get(slot.day).push(slot);
+  }
+  const days = Array.from(dayMap.keys()).sort((a, b) => dayOrderOf(a) - dayOrderOf(b));
+  return `<div class="mobile-schedule-list">
+    ${days.map(day => {
+      const daySlots = dayMap.get(day).slice().sort((a, b) =>
+        ((a.startMinutes || 0) - (b.startMinutes || 0))
+        || String(a.subject || '').localeCompare(String(b.subject || ''))
+        || String(a.grade || '').localeCompare(String(b.grade || ''))
+      );
+      return `<div class="mobile-day-block">
+        <div class="mobile-day-heading">${escapeHtml(day)} · ${daySlots.length} 个时段</div>
+        ${daySlots.map(renderMobileSlotCard).join('')}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderMobileSlotCard(slot) {
+  const cls = slot.status && slot.status !== 'empty' ? slot.status : 'unmarked';
+  const rateText = slot.attendanceRate == null
+    ? (STATUS_LABEL[slot.status] || '未点名')
+    : `${pct(slot.attendanceRate)} 出勤`;
+  const teacher = slot.teacherDisplay || slot.teacher || '-';
+  return `
+    <button class="mobile-slot-card ${cls}" type="button" data-key="${escapeHtml(slot.key)}">
+      <div class="slot-top">
+        <div class="slot-time">${escapeHtml(slot.timeRange || '-')}</div>
+        <div class="slot-rate">${escapeHtml(rateText)}</div>
+      </div>
+      <div class="slot-main">${escapeHtml(slot.subject || '?')} ${escapeHtml(slot.grade || '')}</div>
+      <div class="slot-meta">
+        <span>${escapeHtml(teacher)}</span>
+        <span>${escapeHtml(slot.branch || '-')}</span>
+        <span>${fmtNum(slot.classSize)}人</span>
+        <span>${fmtNum(slot.sessionCount)}次</span>
+      </div>
+    </button>
   `;
 }
 
@@ -3939,6 +3986,56 @@ function bindExportPDF() {
   });
 }
 
+function isPwaStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
+
+function bindInstallPrompt() {
+  const btn = $('#install-pwa-btn');
+  if (!btn) return;
+
+  function hideButton() {
+    btn.style.display = 'none';
+  }
+
+  function showButton() {
+    if (!isPwaStandalone()) btn.style.display = 'inline-flex';
+  }
+
+  hideButton();
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    state.installPromptEvent = event;
+    showButton();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    state.installPromptEvent = null;
+    hideButton();
+  });
+
+  btn.addEventListener('click', async () => {
+    const promptEvent = state.installPromptEvent;
+    if (!promptEvent) {
+      hideButton();
+      return;
+    }
+    promptEvent.prompt();
+    try {
+      await promptEvent.userChoice;
+    } catch (e) {
+      // Some browsers reject when the prompt is dismissed. The button can
+      // safely disappear until the browser offers another install prompt.
+    }
+    state.installPromptEvent = null;
+    hideButton();
+  });
+
+  if (isPwaStandalone()) hideButton();
+}
+
 function exportModalPDF() {
   // Inject a print-only header so the PDF identifies the entity (teacher
   // or subject). The modal H2 already has the name; we just add a project
@@ -3991,6 +4088,7 @@ async function init() {
   bindFilters();
   bindModalDismiss();
   bindExportPDF();
+  bindInstallPrompt();
   const canLoadDashboard = await loadAuthState({ redirectIfNeeded: true });
   if (!canLoadDashboard) return;
   loadSchedule({ useCache: true });

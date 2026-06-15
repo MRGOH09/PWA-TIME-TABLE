@@ -1,9 +1,11 @@
-const CACHE = 'tuition-shell-v5';
+const CACHE = 'tuition-shell-v6';
 const ASSETS = [
   '/',
   '/index.html',
   '/js/gantt.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
