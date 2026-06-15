@@ -8,6 +8,7 @@ const AXIS_START = 480;   // 08:00
 const AXIS_END = 1320;    // 22:00
 const AXIS_SPAN = AXIS_END - AXIS_START;
 const REFRESH_MS = 30000;
+const LOCAL_STORAGE_RECORD_LIMIT = 5000;
 
 const DAYS = ['1.MON', '2.TUE', '3.WED', '4.THU', '5.FRI', '6.SAT', '7.SUN'];
 const MONTHS = [
@@ -52,8 +53,16 @@ const state = {
   underperfSort: { col: 'rate', dir: 'asc' },
   modalOpen: false,
   lastDataHash: '',
+  dataVersion: 0,
   authUser: null,
   installPromptEvent: null,
+};
+
+const renderMemo = {
+  dataVersion: -1,
+  filterKey: '',
+  filteredRecords: null,
+  slotsByRecords: new WeakMap(),
 };
 
 // ===================================================================
@@ -898,6 +907,10 @@ function loadFromLocalStorage() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.records)) return null;
+    if (parsed.records.length > LOCAL_STORAGE_RECORD_LIMIT) {
+      localStorage.removeItem(cacheKey());
+      return null;
+    }
     return parsed;
   } catch (e) {
     return null;
@@ -906,10 +919,15 @@ function loadFromLocalStorage() {
 
 function saveToLocalStorage(data) {
   try {
+    const records = data.records || [];
+    if (records.length > LOCAL_STORAGE_RECORD_LIMIT) {
+      localStorage.removeItem(cacheKey());
+      return;
+    }
     localStorage.setItem(cacheKey(), JSON.stringify({
       updatedAt: data.updatedAt,
       access: data.access || null,
-      records: data.records,
+      records,
       savedAt: Date.now(),
     }));
   } catch (e) {
@@ -929,6 +947,8 @@ function applyData(data, source) {
   state.updatedAt = data.updatedAt || '';
   state.access = data.access || null;
   state.dataSource = source;
+  state.dataVersion += 1;
+  clearRenderMemo();
   rebuildFilters();
   renderAll();
   updateMeta();
@@ -1103,7 +1123,27 @@ function passFilters(rec, includeStatus) {
 }
 
 function filteredRecords() {
-  return state.records.filter(r => passFilters(r, false));
+  const filterKey = JSON.stringify(state.filters);
+  if (
+    renderMemo.dataVersion === state.dataVersion &&
+    renderMemo.filterKey === filterKey &&
+    renderMemo.filteredRecords
+  ) {
+    return renderMemo.filteredRecords;
+  }
+  const records = state.records.filter(r => passFilters(r, false));
+  renderMemo.dataVersion = state.dataVersion;
+  renderMemo.filterKey = filterKey;
+  renderMemo.filteredRecords = records;
+  renderMemo.slotsByRecords = new WeakMap();
+  return records;
+}
+
+function clearRenderMemo() {
+  renderMemo.dataVersion = -1;
+  renderMemo.filterKey = '';
+  renderMemo.filteredRecords = null;
+  renderMemo.slotsByRecords = new WeakMap();
 }
 
 // ===================================================================
@@ -1111,6 +1151,8 @@ function filteredRecords() {
 // ===================================================================
 
 function deriveWeeklySlots(records) {
+  const cached = renderMemo.slotsByRecords.get(records);
+  if (cached) return cached;
   const map = new Map();
   for (const r of records) {
     if (!r.day || r.startMinutes == null || r.endMinutes == null) continue;
@@ -1144,7 +1186,9 @@ function deriveWeeklySlots(records) {
     slot.classSize = Math.max(...slot.sessions.map(s => s.classSize || 0), 0);
     slot.status = statusForAttendance(slot.present, slot.absent, slot.none);
   }
-  return Array.from(map.values());
+  const slots = Array.from(map.values());
+  renderMemo.slotsByRecords.set(records, slots);
+  return slots;
 }
 
 // ===================================================================
