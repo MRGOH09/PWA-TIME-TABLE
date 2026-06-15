@@ -52,6 +52,7 @@ const state = {
   underperfSort: { col: 'rate', dir: 'asc' },
   modalOpen: false,
   lastDataHash: '',
+  authUser: null,
 };
 
 // ===================================================================
@@ -882,11 +883,17 @@ function renderTeacherAttendanceClassTrend(records, teacher, level) {
 // Data loading + localStorage cache
 // ===================================================================
 
-const CACHE_KEY = 'tuition-schedule-cache-v1';
+const CACHE_KEY_BASE = 'tuition-schedule-cache-v2';
+
+function cacheKey() {
+  const user = state.authUser || {};
+  const id = (user.email || user.username || 'anonymous').toLowerCase();
+  return `${CACHE_KEY_BASE}:${id}`;
+}
 
 function loadFromLocalStorage() {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(cacheKey());
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.records)) return null;
@@ -898,8 +905,9 @@ function loadFromLocalStorage() {
 
 function saveToLocalStorage(data) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
+    localStorage.setItem(cacheKey(), JSON.stringify({
       updatedAt: data.updatedAt,
+      access: data.access || null,
       records: data.records,
       savedAt: Date.now(),
     }));
@@ -918,6 +926,7 @@ function applyData(data, source) {
   state.lastDataHash = newHash;
   state.records = data.records || [];
   state.updatedAt = data.updatedAt || '';
+  state.access = data.access || null;
   state.dataSource = source;
   rebuildFilters();
   renderAll();
@@ -968,18 +977,21 @@ async function loadAuthState({ redirectIfNeeded = false } = {}) {
       return true;
     }
     if (data.authenticated) {
-      const username = (data.user && data.user.username) || '已登录';
+      state.authUser = data.user || null;
+      const username = (data.user && (data.user.name || data.user.email || data.user.username)) || '已登录';
       if (node) {
         node.style.display = '';
         node.className = 'auth-chip ok';
         node.innerHTML = `${escapeHtml(username)} <button type="button" id="auth-logout">登出</button>`;
         $('#auth-logout').addEventListener('click', async () => {
           await fetch('/api/auth_logout', { method: 'POST' });
+          try { localStorage.removeItem(cacheKey()); } catch (e) {}
           location.href = '/api/auth_login';
         });
       }
       return true;
     }
+    state.authUser = null;
     if (redirectIfNeeded) {
       location.replace('/api/auth_login');
       return false;
@@ -994,6 +1006,7 @@ async function loadAuthState({ redirectIfNeeded = false } = {}) {
     }
     return false;
   } catch (err) {
+    state.authUser = null;
     if (node) {
       node.style.display = '';
       node.className = 'auth-chip warn';
@@ -1011,7 +1024,10 @@ function updateMeta() {
   const tail = state.dataSource === 'cache'
     ? ' · <span style="color:var(--muted);">显示本地缓存，正在刷新…</span>'
     : '';
-  $('#meta').innerHTML = `共 ${state.records.length} 条记录 · 更新时间 ${escapeHtml(state.updatedAt || '-')}${tail}`;
+  const access = state.access && state.access.permission
+    ? ` · 权限 ${escapeHtml(state.access.permission)}`
+    : '';
+  $('#meta').innerHTML = `共 ${state.records.length} 条记录 · 更新时间 ${escapeHtml(state.updatedAt || '-')}${access}${tail}`;
 }
 
 // ===================================================================

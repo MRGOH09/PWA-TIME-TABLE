@@ -7,10 +7,12 @@ from urllib.parse import parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _system_auth import (
     auth_required,
+    auth_mode,
     cookie_header,
     credentials_match,
     current_user,
-    make_session_cookie,
+    google_authorize_url,
+    make_legacy_session_cookie,
     send_redirect,
 )
 
@@ -115,13 +117,16 @@ class handler(BaseHTTPRequestHandler):
             if not auth_required() or current_user(self):
                 send_redirect(self, "/")
                 return
+            if auth_mode() == "google":
+                send_redirect(self, google_authorize_url(self))
+                return
             _send_html(self, 200, _login_html())
         except Exception as exc:
             self.send_error(500, str(exc))
 
     def do_POST(self):
         try:
-            if not auth_required():
+            if not auth_required() or auth_mode() == "google":
                 send_redirect(self, "/")
                 return
             length = int(self.headers.get("Content-Length") or 0)
@@ -130,7 +135,7 @@ class handler(BaseHTTPRequestHandler):
             username = (params.get("username") or [""])[0]
             password = (params.get("password") or [""])[0]
             if credentials_match(username, password):
-                session = make_session_cookie(username.strip())
+                session = make_legacy_session_cookie(username.strip())
                 send_redirect(self, "/", cookies=[cookie_header(session)])
                 return
             _send_html(self, 401, _login_html("用户名或密码不正确。"))

@@ -268,6 +268,7 @@ def normalize_record(item):
     level = extract_text(fields.get(FIELD_LEVEL))
     teacher = extract_text(fields.get(FIELD_TEACHER))
     teacher_display = extract_first_text(fields.get(FIELD_TEACHER_DISPLAY)) or teacher
+    teacher_lookup = extract_first_text(fields.get(FIELD_TEACHER_LOOKUP))
     month = extract_text(fields.get(FIELD_MONTH))
     date_iso = extract_date(fields.get(FIELD_DATE)) or extract_date(fields.get(FIELD_DATE_TEXT))
 
@@ -290,6 +291,7 @@ def normalize_record(item):
         "level": level,
         "teacher": teacher,
         "teacherDisplay": teacher_display,
+        "teacherLookup": teacher_lookup,
         "month": month,
         "monthOrder": parse_month_order(month),
         "date": date_iso,

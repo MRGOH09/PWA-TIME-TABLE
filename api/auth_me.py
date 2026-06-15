@@ -3,7 +3,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _system_auth import auth_required, current_user, send_auth_json
+from _system_auth import auth_mode, auth_required, current_user, send_auth_json
 
 
 class handler(BaseHTTPRequestHandler):
@@ -14,6 +14,7 @@ class handler(BaseHTTPRequestHandler):
             send_auth_json(self, 200, {
                 "success": True,
                 "authRequired": required,
+                "authMode": auth_mode(),
                 "authenticated": bool(user),
                 "user": user,
             })

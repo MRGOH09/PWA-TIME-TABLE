@@ -1581,48 +1581,63 @@ V1 is considered ready for internal staff review when:
 * a known busy teacher's modal matches manual Lark Base spot checks, and
 * mobile layout is readable enough for basic review.
 
-## System Auth — 2026-05-16
+## Google Auth + Timetable Permissions — 2026-06-15
 
-Lark OAuth dashboard login has been removed. The dashboard now uses a simple
-system username/password gate backed by Vercel environment variables.
+The dashboard uses Google OAuth when `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` are configured. The old system username/password gate
+remains only as a fallback for environments without Google OAuth configured.
 
 Implemented auth routes:
 
 * `/api/auth_login`
+* `/api/auth_callback`
 * `/api/auth_me`
 * `/api/auth_logout`
 
-`/` and `/index.html` redirect to `/api/auth_login` when system auth is
-configured and the browser has no valid session cookie. `/api/schedule` also
-returns `401 Unauthorized` without a valid session cookie, so the data API is
-not open when the dashboard is protected. When system auth is configured,
-`/api/schedule` uses `Cache-Control: private, no-store` instead of shared CDN
-cache.
+`/` and `/index.html` redirect to `/api/auth_login` when auth is configured
+and the browser has no valid session cookie. `/api/schedule` also returns
+`401 Unauthorized` without a valid session cookie, so the data API is not open
+when the dashboard is protected. When auth is configured, `/api/schedule` uses
+`Cache-Control: private, no-store` instead of shared CDN cache.
 
-Required auth environment variables:
+Required Google auth environment variables:
 
-* `SYSTEM_USERNAME`
-* `SYSTEM_PASSWORD`
+* `GOOGLE_CLIENT_ID`
+* `GOOGLE_CLIENT_SECRET`
+* `GOOGLE_AUTH_SECRET`
 
-Optional auth environment variable:
+Optional Google auth environment variable:
 
-* `SYSTEM_AUTH_SECRET` — separate signing secret for dashboard session cookies.
-  If omitted, the system password signs the cookie.
+* `GOOGLE_REDIRECT_URI` — explicit callback URL. If omitted, the server derives
+  `https://<host>/api/auth_callback` from request headers.
 
-Auth-related environment variables are no longer used by the dashboard:
+Required timetable permission environment variable:
 
-* `AUTH_REQUIRED`
-* `AUTH_COOKIE_SECRET`
-* `AUTH_REDIRECT_URL`
-* `AUTH_SUCCESS_URL`
-* `ALLOWED_LARK_OPEN_IDS`
-* `ALLOWED_EMAILS`
-* `LARK_AUTH_BASE_TOKEN`
-* `LARK_AUTH_TABLE_ID`
-* `LARK_OAUTH_SCOPE`
-* `LARK_OAUTH_AUTHORIZE_URL`
+* `LARK_PERMISSION_TABLE_ID` — the `全员详情` table containing `GMAIL` and
+  `时间表权限`.
 
-Do not commit actual system credentials. Put the username and password values
+Optional timetable permission environment variable:
+
+* `LARK_PERMISSION_BASE_TOKEN` — only needed if the permission table is in a
+  different Base from `LARK_BASE_TOKEN`.
+
+Permission source and rules:
+
+* Google login email is matched against `全员详情.GMAIL`.
+* The matched row's `时间表权限` controls `/api/schedule` output.
+* `全局` returns all 点名 records.
+* `个人` or blank returns only records matching the same teacher via
+  `LOOKUP老师名字`, `Teacher`, or `looklookup`.
+* `中学科学` returns `FORMULA 中小 = 中学` and `科目 = SN`.
+* `中学理科` returns `FORMULA 中小 = 中学` and `科目 in BIO, PHY, CHEM`.
+* `中学华语` returns `FORMULA 中小 = 中学` and `科目 = BC`.
+
+Data filtering must happen in `/api/schedule`; never fetch all records to the
+browser and rely on frontend filters for access control. Frontend localStorage
+cache is keyed by authenticated user to avoid cross-user leakage on shared
+devices.
+
+Do not commit actual Google credentials or auth secrets. Put secret values
 directly in Vercel Environment Variables.
 
 Keep the existing Lark Base read-only environment variables. They are still
@@ -1643,8 +1658,9 @@ required for `/api/schedule`:
   no direction chosen yet (Apple Calendar / Linear / iOS / 商务 etc.)
 * Mobile polish — basic responsive tweaks done, full mobile pass
   not yet validated
-* Auth: V1 uses a simple system username/password gate; revisit before
-  wider external sharing if stronger SSO is needed
+* Auth: Google OAuth is implemented in code; production still needs Google
+  OAuth client credentials configured in Vercel and a smoke test against live
+  permission data.
 
 ## Next Steps
 
