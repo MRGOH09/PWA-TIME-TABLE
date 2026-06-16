@@ -31,11 +31,19 @@ class handler(BaseHTTPRequestHandler):
                     token = get_tenant_access_token(env["LARK_APP_ID"], env["LARK_APP_SECRET"])
                 return token
 
-            records, schedule_cache = get_schedule_records(get_token, env)
+            records, schedule_cache = get_schedule_records(
+                get_token,
+                env,
+                refresh_when_stale=False,
+            )
             access = None
             permission_cache = None
             if auth_mode() == "google":
-                profiles, permission_cache = get_access_profiles(get_token, env)
+                profiles, permission_cache = get_access_profiles(
+                    get_token,
+                    env,
+                    refresh_when_stale=False,
+                )
                 profile = load_access_profile_from_profiles(user, profiles)
                 if not profile:
                     send_json(self, 403, {

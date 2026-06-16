@@ -1670,6 +1670,9 @@ Cache behavior:
 * When Google auth is active, permission lookup uses cached minimal access
   profiles derived from `全员详情`; it does not cache unrelated personal fields.
 * Permission filtering still happens in `/api/schedule` on every request.
+* User-facing `/api/schedule` requests must not block on refreshing an expired
+  but still-stale cache snapshot. Serve the stale Redis snapshot immediately
+  and let `/api/refresh_cache` handle Lark refreshes.
 * If Redis is unavailable, the code falls back to per-instance memory cache.
 * If refresh fails but a stale Redis or memory snapshot is still available,
   the API serves the stale snapshot instead of returning a blank dashboard.

@@ -203,7 +203,15 @@ def refresh_cached_value(key, kind, loader, fresh_seconds=None, stale_seconds=No
     return payload, _meta(entry, backend, "refresh", warnings)
 
 
-def get_cached_value(key, kind, loader, fresh_seconds=None, stale_seconds=None, force_refresh=False):
+def get_cached_value(
+    key,
+    kind,
+    loader,
+    fresh_seconds=None,
+    stale_seconds=None,
+    force_refresh=False,
+    refresh_when_stale=True,
+):
     entry = None
     backend = "miss"
     warnings = []
@@ -214,6 +222,10 @@ def get_cached_value(key, kind, loader, fresh_seconds=None, stale_seconds=None, 
             entry = None
         if entry and _now() <= float(entry.get("freshUntil", 0)):
             return entry["payload"], _meta(entry, backend, "hit", warnings)
+        if entry and not refresh_when_stale:
+            if _now() <= float(entry.get("staleUntil", 0)):
+                return entry["payload"], _meta(entry, backend, "stale", warnings)
+            entry = None
     try:
         return refresh_cached_value(
             key,

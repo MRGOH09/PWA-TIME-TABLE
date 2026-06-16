@@ -30,21 +30,23 @@ def load_access_profiles(token_or_loader, env):
     return build_access_profiles(raw)
 
 
-def get_schedule_records(token_or_loader, env, force_refresh=False):
+def get_schedule_records(token_or_loader, env, force_refresh=False, refresh_when_stale=True):
     return get_cached_value(
         schedule_cache_key(env),
         "schedule-records",
         lambda: load_schedule_records(token_or_loader, env),
         force_refresh=force_refresh,
+        refresh_when_stale=refresh_when_stale,
     )
 
 
-def get_access_profiles(token_or_loader, env, force_refresh=False):
+def get_access_profiles(token_or_loader, env, force_refresh=False, refresh_when_stale=True):
     return get_cached_value(
         access_cache_key(env),
         "access-profiles",
         lambda: load_access_profiles(token_or_loader, env),
         force_refresh=force_refresh,
+        refresh_when_stale=refresh_when_stale,
     )
 
 

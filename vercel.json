@@ -5,7 +5,7 @@
   "outputDirectory": ".",
   "functions": {
     "api/schedule.py": { "maxDuration": 60 },
-    "api/refresh_cache.py": { "maxDuration": 60 }
+    "api/refresh_cache.py": { "maxDuration": 300 }
   },
   "crons": [
     { "path": "/api/refresh_cache", "schedule": "*/5 * * * *" }
