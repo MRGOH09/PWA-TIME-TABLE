@@ -19,6 +19,7 @@ read-only unless the user explicitly requests a separate V2 editing scope.
 - Stop after each major step and summarize changed files, reasoning, and verification.
 - Tests passing is not enough; explain what behavior was actually verified.
 - Surface failures loudly. Do not hide skipped records, swallowed errors, partial success, or uncertain results.
+- After completing and verifying repository changes, prioritize committing and pushing to GitHub unless the user explicitly says not to push.
 
 ## Task Discipline
 
