@@ -117,7 +117,11 @@ def filter_records_for_profile(records, profile):
     if permission == PERMISSION_SECONDARY_SCIENCE:
         return [
             r for r in records
-            if r.get("level") == "中学" and str(r.get("subject") or "").upper() == "SN"
+            if record_matches_profile(r, profile)
+            or (
+                r.get("level") == "中学"
+                and str(r.get("subject") or "").upper() == "SN"
+            )
         ]
     if permission == PERMISSION_SECONDARY_STEM:
         return [

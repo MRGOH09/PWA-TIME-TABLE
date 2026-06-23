@@ -1628,7 +1628,8 @@ Permission source and rules:
 * `全局` returns all 点名 records.
 * `个人` or blank returns only records matching the same teacher via
   `LOOKUP老师名字`, `Teacher`, or `looklookup`.
-* `中学科学` returns `FORMULA 中小 = 中学` and `科目 = SN`.
+* `中学科学` returns the user's own teacher records plus `FORMULA 中小 = 中学`
+  and `科目 = SN`.
 * `中学理科` returns `FORMULA 中小 = 中学` and `科目 in BIO, PHY, CHEM`.
 * `中学华语` returns `FORMULA 中小 = 中学` and `科目 = BC`.
 
